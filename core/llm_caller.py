@@ -3,7 +3,7 @@ import logging
 import json
 from typing import Dict, Any, Optional
 from pathlib import Path
-import anthropic
+from core.llm_provider import LLMProviderFactory
 from utils.cache_manager import cache_manager
 from config import config
 
@@ -11,29 +11,51 @@ logger = logging.getLogger(__name__)
 
 
 class LLMCaller:
-    """Handles Claude API calls for policy change processing."""
+    """Handles LLM calls with provider abstraction for policy change processing."""
 
-    def __init__(self, api_key: Optional[str] = None):
+    def __init__(
+        self,
+        api_key: Optional[str] = None,
+        provider: str = "anthropic",
+        model: Optional[str] = None,
+    ):
         """
-        Initialize LLM caller.
+        Initialize LLM caller with configurable provider.
 
         Args:
-            api_key: Anthropic API key (uses config if not provided)
+            api_key: API key for the provider (uses config if not provided)
+            provider: LLM provider to use ('anthropic', 'openai', 'mock')
+            model: Model name (uses config default if not provided)
         """
         self.api_key = api_key or config.api_key
-        if not self.api_key:
-            raise ValueError("Anthropic API key not provided or configured")
-
-        self.client = anthropic.Anthropic(api_key=self.api_key)
-        self.model = config.model
+        self.provider_type = provider or getattr(config, "llm_provider", "anthropic")
+        self.model = model or config.model
         self.max_tokens = config.max_tokens
         self.logger = logger
+
+        # Create provider instance
+        self.provider = LLMProviderFactory.create_provider(
+            provider_type=self.provider_type,
+            api_key=self.api_key,
+            model=self.model,
+        )
+
+        if not self.provider.is_configured():
+            self.logger.warning(
+                f"LLM provider '{self.provider_type}' is not properly configured. "
+                "Using mock provider for testing. "
+                "Set API key to enable real LLM features."
+            )
+            # Fall back to mock provider
+            self.provider = LLMProviderFactory.create_provider(provider_type="mock")
+
+        self.logger.info(f"LLM Caller initialized with provider: {self.provider.get_provider_name()}")
 
     def translate_change(
         self, change_data: Dict[str, Any], context: str, master_docx_path: str
     ) -> Dict[str, Any]:
         """
-        Translate change using Claude API.
+        Translate change using configured LLM provider.
 
         Args:
             change_data: Change data from detector
@@ -51,57 +73,53 @@ class LLMCaller:
                 self.logger.info(f"Using cached result for change {cache_key[:20]}")
                 return cached_result
 
-            # Build prompt
+            # Build prompts
             system_prompt = self._build_system_prompt()
             user_prompt = self._build_user_prompt(change_data, context)
 
-            self.logger.debug(f"Calling Claude API with model: {self.model}")
+            self.logger.debug(f"Calling LLM provider: {self.provider.get_provider_name()}")
 
-            # Call Claude API
-            response = self.client.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                system=system_prompt,
-                messages=[{"role": "user", "content": user_prompt}],
+            # Call provider
+            result = self.provider.translate_change(
+                change_data=change_data,
+                context=context,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
             )
 
-            # Extract response
-            response_text = response.content[0].text
-
-            # Parse JSON from response
-            result = self._parse_llm_response(response_text)
+            # Check if provider returned an error
+            if "error" in result and result.get("error"):
+                self.logger.warning(
+                    f"LLM provider returned error: {result['error']}. "
+                    "Attempting mock fallback..."
+                )
+                # Fall back to mock provider
+                mock_provider = LLMProviderFactory.create_provider(provider_type="mock")
+                result = mock_provider.translate_change(
+                    change_data=change_data,
+                    context=context,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                )
 
             # Cache the result
             cache_manager.set(cache_key, result)
 
-            self.logger.info(f"Successfully translated change with confidence {result.get('confidence_score', 0)}")
+            confidence = result.get("confidence_score", 0)
+            is_mock = result.get("is_mock", False)
+            mock_note = " (Mock - no API)" if is_mock else ""
+            self.logger.info(
+                f"Successfully translated change with confidence {confidence:.1%}{mock_note}"
+            )
             return result
 
-        except json.JSONDecodeError as e:
-            self.logger.error(f"JSON parsing error: {e}")
-            return {
-                "suggested_narrative": None,
-                "format_type": "error",
-                "confidence_score": 0,
-                "reasoning": f"JSON parsing failed: {str(e)}",
-                "error": "JSON_PARSE_ERROR",
-            }
-        except anthropic.APIError as e:
-            self.logger.error(f"API error: {e}")
-            return {
-                "suggested_narrative": None,
-                "format_type": "error",
-                "confidence_score": 0,
-                "reasoning": f"API error: {str(e)}",
-                "error": "API_ERROR",
-            }
         except Exception as e:
             self.logger.error(f"Unexpected error in translate_change: {e}")
             return {
                 "suggested_narrative": None,
                 "format_type": "error",
                 "confidence_score": 0,
-                "reasoning": f"Unexpected error: {str(e)}",
+                "reasoning": f"Error: {str(e)}",
                 "error": "UNKNOWN_ERROR",
             }
 

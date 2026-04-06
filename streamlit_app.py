@@ -588,10 +588,20 @@ def sidebar_config():
         st.write("**Change Files:** data/changes/")
         st.write("**Metadata:** data/metadata/")
 
-    with st.sidebar.expander("LLM"):
-        st.write("**Model:** Claude 3.5 Sonnet")
-        st.write("**Max Tokens:** 1000")
+    with st.sidebar.expander("LLM Configuration"):
+        from config import config
+
+        st.write(f"**Provider:** {config.llm_provider.capitalize()}")
+        st.write(f"**Model:** {config.model}")
+        st.write(f"**Max Tokens:** {config.max_tokens}")
+
+        if config.api_key:
+            st.write("**API Key:** ✅ Configured")
+        else:
+            st.warning("**API Key:** ⚠️ Not configured (using mock provider)")
+
         st.write("**Caching:** Enabled")
+        st.caption("📖 See LLM_PROVIDERS.md for configuration options")
 
 
 # ============================================================================

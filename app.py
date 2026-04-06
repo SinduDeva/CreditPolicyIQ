@@ -274,13 +274,22 @@ async def translate_change(change_id: str) -> Dict[str, Any]:
         # Initialize LLM caller if needed
         global llm_caller
         if not llm_caller:
-            if not config.api_key:
-                logger.error("Anthropic API key not configured")
-                raise HTTPException(
-                    status_code=400,
-                    detail="API key not configured"
+            # Initialize LLM caller with configured provider
+            # Falls back to mock provider if API key not available
+            logger.info(f"Initializing LLM caller with provider: {config.llm_provider}")
+            llm_caller = LLMCaller(
+                api_key=config.api_key,
+                provider=config.llm_provider,
+                model=config.model,
+            )
+
+            if config.api_key:
+                logger.info(f"LLM provider: {config.llm_provider} with API key configured")
+            else:
+                logger.warning(
+                    "No LLM API key configured. Using mock provider for testing. "
+                    "Set LLM_API_KEY environment variable to enable real LLM features."
                 )
-            llm_caller = LLMCaller(config.api_key)
 
         logger.info(f"Translating change {change_id}")
 
