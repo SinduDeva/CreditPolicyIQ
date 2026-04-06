@@ -1,0 +1,631 @@
+"""Interactive Streamlit dashboard for CreditPolicyIQ."""
+import streamlit as st
+import requests
+import pandas as pd
+from datetime import datetime
+from typing import Dict, Any, Optional, List
+
+# Page configuration
+st.set_page_config(
+    page_title="Credit Policy Automation POC",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+# API Configuration
+API_BASE_URL = "http://localhost:8000/api"
+REQUEST_TIMEOUT = 10
+
+# ============================================================================
+# UTILITY FUNCTIONS
+# ============================================================================
+
+
+def api_call(
+    method: str, endpoint: str, json_data: Optional[Dict] = None, files: Optional[Dict] = None
+) -> tuple[bool, Any]:
+    """
+    Make API call and handle errors.
+
+    Args:
+        method: HTTP method (GET, POST, etc.)
+        endpoint: API endpoint path
+        json_data: JSON body data
+        files: Files to upload
+
+    Returns:
+        Tuple of (success, response_data)
+    """
+    try:
+        url = f"{API_BASE_URL}{endpoint}"
+        headers = {}
+
+        if method == "GET":
+            response = requests.get(url, timeout=REQUEST_TIMEOUT)
+        elif method == "POST":
+            if files:
+                response = requests.post(url, files=files, timeout=REQUEST_TIMEOUT)
+            else:
+                headers["Content-Type"] = "application/json"
+                response = requests.post(
+                    url, json=json_data, headers=headers, timeout=REQUEST_TIMEOUT
+                )
+        else:
+            return False, "Unsupported HTTP method"
+
+        if response.status_code == 200:
+            return True, response.json()
+        else:
+            error_msg = response.text or f"HTTP {response.status_code}"
+            return False, error_msg
+
+    except requests.exceptions.ConnectionError:
+        return False, "Cannot connect to API. Make sure FastAPI server is running on http://localhost:8000"
+    except requests.exceptions.Timeout:
+        return False, f"Request timeout after {REQUEST_TIMEOUT} seconds"
+    except Exception as e:
+        return False, str(e)
+
+
+def display_metric(label: str, value: Any, delta: Optional[str] = None):
+    """Display a metric in a column."""
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.metric(label, value, delta=delta)
+
+
+# ============================================================================
+# PAGE 1: DASHBOARD
+# ============================================================================
+
+
+def page_dashboard():
+    """Dashboard page with metrics and recent changes."""
+    st.title("📊 Dashboard")
+
+    # Fetch data
+    with st.spinner("Loading dashboard data..."):
+        # Get pending changes
+        success_pending, pending_data = api_call("GET", "/changes/pending")
+        pending_count = pending_data.get("total_pending", 0) if success_pending else 0
+
+        # Get changes log
+        success_changes, changes_data = api_call("GET", "/logs/changes")
+        total_changes = changes_data.get("total_entries", 0) if success_changes else 0
+
+        # Get approvals log
+        success_approvals, approvals_data = api_call("GET", "/logs/approvals")
+        approved_count = approvals_data.get("total_entries", 0) if success_approvals else 0
+
+    # Display metrics
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("⏳ Pending Changes", pending_count)
+
+    with col2:
+        st.metric("📝 Total Changes", total_changes)
+
+    with col3:
+        st.metric("✅ Approved Changes", approved_count)
+
+    with col4:
+        st.metric("📚 Documents", "1")
+
+    st.divider()
+
+    # Display recent changes table
+    st.subheader("Recent Changes")
+
+    if success_pending and pending_data.get("changes"):
+        changes_list = []
+        for change in pending_data.get("changes", [])[:10]:  # Show last 10
+            changes_list.append({
+                "Change ID": change.get("change_id", "N/A")[:20],
+                "Type": change.get("original_data", {}).get("Change_Type", "N/A"),
+                "Section": change.get("original_data", {}).get("Section_Name", "N/A")[:30],
+                "Status": change.get("status", "N/A"),
+            })
+
+        if changes_list:
+            df = pd.DataFrame(changes_list)
+            st.dataframe(df, use_container_width=True, hide_index=True)
+        else:
+            st.info("No pending changes found.")
+    else:
+        st.error("Failed to load pending changes")
+
+
+# ============================================================================
+# PAGE 2: UPLOAD EXCEL
+# ============================================================================
+
+
+def page_upload_excel():
+    """Upload Excel file with underwriting changes."""
+    st.title("📤 Upload Excel Changes")
+
+    st.write("Upload Excel file with underwriting policy changes")
+
+    # Display required columns
+    with st.expander("📋 Required Columns"):
+        cols = [
+            "Section_ID",
+            "Section_Name",
+            "Policy_Content",
+            "UW_Technical_Details",
+            "Status",
+            "Color_Flag",
+            "Notes",
+        ]
+        st.write(", ".join(cols))
+
+    # File uploader
+    uploaded_file = st.file_uploader("Choose Excel file", type=["xlsx"])
+
+    if uploaded_file:
+        st.info(f"Selected file: {uploaded_file.name}")
+
+        if st.button("Upload and Parse", type="primary"):
+            with st.spinner("Uploading and parsing Excel..."):
+                success, result = api_call(
+                    "POST",
+                    "/upload-excel",
+                    files={"file": (uploaded_file.name, uploaded_file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+                )
+
+            if success:
+                st.success("✅ File uploaded successfully!")
+
+                # Display summary
+                col1, col2, col3, col4 = st.columns(4)
+                summary = result.get("excel_summary", {})
+
+                with col1:
+                    st.metric("Total Changes", result.get("total_changes", 0))
+
+                with col2:
+                    st.metric("New Policies", summary.get("by_type", {}).get("NEW", 0))
+
+                with col3:
+                    st.metric("Modified", summary.get("by_type", {}).get("MODIFIED", 0))
+
+                with col4:
+                    st.metric("Deleted", summary.get("by_type", {}).get("DELETED", 0))
+
+                # Display detected changes table
+                st.subheader("Detected Changes")
+                changes = result.get("changes", [])
+
+                if changes:
+                    changes_list = []
+                    for change in changes:
+                        changes_list.append({
+                            "Change ID": change.get("change_id", "N/A")[:20],
+                            "Type": change.get("original_data", {}).get("Change_Type", "N/A"),
+                            "Section": change.get("original_data", {}).get("Section_Name", "N/A")[:30],
+                            "Confidence": f"{change.get('confidence_score', 0):.1%}",
+                        })
+
+                    df = pd.DataFrame(changes_list)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No changes detected in file.")
+            else:
+                st.error(f"Failed to upload file: {result}")
+
+
+# ============================================================================
+# PAGE 3: REVIEW CHANGES
+# ============================================================================
+
+
+def page_review_changes():
+    """Review and translate pending changes."""
+    st.title("🔍 Review Changes")
+
+    with st.spinner("Loading pending changes..."):
+        success, data = api_call("GET", "/changes/pending")
+
+    if not success:
+        st.error(f"Failed to load pending changes: {data}")
+        return
+
+    pending_count = data.get("total_pending", 0)
+    st.metric("Pending Changes", pending_count)
+
+    if pending_count == 0:
+        st.info("No pending changes to review.")
+        return
+
+    changes = data.get("changes", [])
+
+    # Display each change in expandable cards
+    for idx, change in enumerate(changes):
+        change_id = change.get("change_id", f"Change_{idx}")
+        status = change.get("status", "UNKNOWN")
+        original = change.get("original_data", {})
+        match = change.get("match_details", {})
+
+        with st.expander(
+            f"🔹 {original.get('Section_Name', 'Unknown')[:40]} - {status}", expanded=False
+        ):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.write("**Excel Content:**")
+                st.code(original.get("Policy_Content", "N/A"), language="text")
+
+                st.write("**UW Technical Details:**")
+                st.code(original.get("UW_Technical_Details", "N/A"), language="text")
+
+            with col2:
+                st.write("**Master Document Context:**")
+                if match.get("matched"):
+                    st.success(f"✅ Matched to: {match.get('section_title', 'Unknown')}")
+                    st.write(f"Confidence: {match.get('similarity_score', 0):.1%}")
+                else:
+                    st.warning("⚠️ No matching section found")
+
+            st.divider()
+
+            # Status-specific actions
+            if status == "PENDING":
+                if st.button(
+                    f"🤖 Translate with Claude", key=f"translate_{change_id}"
+                ):
+                    with st.spinner("Translating change..."):
+                        success, result = api_call("POST", f"/changes/{change_id}/translate")
+
+                    if success:
+                        st.success("✅ Change translated!")
+                        st.rerun()
+                    else:
+                        st.error(f"Translation failed: {result}")
+
+            elif status == "PENDING_REVIEW":
+                llm_result = change.get("llm_suggestion", {})
+
+                st.write("**LLM Suggestion:**")
+                st.text_area(
+                    "Suggested Narrative",
+                    value=llm_result.get("suggested_narrative", ""),
+                    disabled=True,
+                    height=150,
+                    key=f"narrative_{change_id}",
+                )
+
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Confidence Score", f"{llm_result.get('confidence_score', 0):.1%}")
+
+                with col2:
+                    st.metric("Format Type", llm_result.get("format_type", "N/A"))
+
+                with st.expander("📖 Reasoning"):
+                    st.info(llm_result.get("reasoning", "No reasoning provided"))
+
+
+# ============================================================================
+# PAGE 4: APPROVE CHANGES
+# ============================================================================
+
+
+def page_approve_changes():
+    """Approve or reject pending changes."""
+    st.title("✅ Approve Changes")
+
+    with st.spinner("Loading changes ready for approval..."):
+        success, data = api_call("GET", "/changes/pending")
+
+    if not success:
+        st.error(f"Failed to load changes: {data}")
+        return
+
+    pending_changes = [
+        c for c in data.get("changes", []) if c.get("status") == "PENDING_REVIEW"
+    ]
+
+    if not pending_changes:
+        st.info("No changes ready for approval.")
+        return
+
+    st.metric("Changes Ready for Approval", len(pending_changes))
+
+    for idx, change in enumerate(pending_changes):
+        change_id = change.get("change_id", f"Change_{idx}")
+        original = change.get("original_data", {})
+        llm_result = change.get("llm_suggestion", {})
+
+        with st.expander(
+            f"🔹 {original.get('Section_Name', 'Unknown')[:40]}", expanded=False
+        ):
+            # Display suggestion
+            st.write("**Suggested Narrative:**")
+            st.code(llm_result.get("suggested_narrative", "N/A"))
+
+            # Metrics
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Confidence", f"{llm_result.get('confidence_score', 0):.1%}")
+
+            with col2:
+                st.metric("Format", llm_result.get("format_type", "N/A"))
+
+            st.divider()
+
+            # Approval/Rejection actions
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.write("**Approve this change:**")
+                with st.form(f"approve_form_{change_id}"):
+                    comment = st.text_area(
+                        "Comment (optional)",
+                        placeholder="Add approval comment...",
+                        key=f"approve_comment_{change_id}",
+                    )
+                    submit = st.form_submit_button("✅ Approve", use_container_width=True)
+
+                    if submit:
+                        if st.checkbox("Confirm approval", key=f"confirm_approve_{change_id}"):
+                            with st.spinner("Approving change..."):
+                                success, result = api_call(
+                                    "POST",
+                                    f"/changes/{change_id}/approve",
+                                    json_data={"user": "dashboard_user", "comment": comment},
+                                )
+
+                            if success:
+                                st.success("✅ Change approved!")
+                                st.rerun()
+                            else:
+                                st.error(f"Approval failed: {result}")
+
+            with col2:
+                st.write("**Reject this change:**")
+                with st.form(f"reject_form_{change_id}"):
+                    reason = st.text_area(
+                        "Reason for rejection",
+                        placeholder="Explain why this change is being rejected...",
+                        key=f"reject_reason_{change_id}",
+                    )
+                    submit = st.form_submit_button("❌ Reject", use_container_width=True)
+
+                    if submit:
+                        if st.checkbox("Confirm rejection", key=f"confirm_reject_{change_id}"):
+                            with st.spinner("Rejecting change..."):
+                                success, result = api_call(
+                                    "POST",
+                                    f"/changes/{change_id}/reject",
+                                    json_data={"reason": reason or "No reason provided"},
+                                )
+
+                            if success:
+                                st.success("✅ Change rejected!")
+                                st.rerun()
+                            else:
+                                st.error(f"Rejection failed: {result}")
+
+
+# ============================================================================
+# PAGE 5: MASTER DOCUMENT
+# ============================================================================
+
+
+def page_master_document():
+    """Manage master document and apply approved changes."""
+    st.title("📄 Master Document")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.write("**Current Master Document:**")
+        st.info("master_policy_current.docx")
+
+        if st.button("📥 Download Current", type="primary"):
+            with st.spinner("Downloading document..."):
+                success, data = api_call("GET", "/master/current")
+
+            if success:
+                st.success("✅ Download ready!")
+                # Note: In real implementation, would need to handle binary response
+                st.write("(Download available via API)")
+            else:
+                st.error(f"Download failed: {data}")
+
+    with col2:
+        st.write("**Apply Approved Changes:**")
+
+        if st.button("🚀 Apply All Approved Changes", type="primary"):
+            if st.checkbox("I confirm to apply all approved changes to the master document"):
+                with st.spinner("Applying changes..."):
+                    success, result = api_call("POST", "/master/apply-changes")
+
+                if success:
+                    st.success("✅ Changes applied successfully!")
+
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric(
+                            "Version Created",
+                            result.get("version_created", "N/A").split("/")[-1] if result.get("version_created") else "N/A",
+                        )
+
+                    with col2:
+                        st.metric("Changes Applied", result.get("changes_applied", 0))
+
+                    st.info(
+                        f"Total approved changes: {result.get('total_approved', 0)}"
+                    )
+                else:
+                    st.error(f"Failed to apply changes: {result}")
+
+
+# ============================================================================
+# PAGE 6: VERSION HISTORY
+# ============================================================================
+
+
+def page_version_history():
+    """View version history of master document."""
+    st.title("📚 Version History")
+
+    with st.spinner("Loading version history..."):
+        success, data = api_call("GET", "/master/versions")
+
+    if not success:
+        st.error(f"Failed to load versions: {data}")
+        return
+
+    versions = data.get("versions", [])
+    st.metric("Total Versions", len(versions))
+
+    if versions:
+        versions_list = []
+        for v in versions:
+            versions_list.append({
+                "Version": v.get("version", "N/A"),
+                "Created": v.get("created_at", "N/A")[:10],
+                "Changes Applied": v.get("changes_applied", 0),
+                "Path": v.get("path", "N/A").split("/")[-1] if v.get("path") else "N/A",
+            })
+
+        df = pd.DataFrame(versions_list)
+        st.dataframe(df, use_container_width=True, hide_index=True)
+    else:
+        st.info("No versions found.")
+
+
+# ============================================================================
+# PAGE 7: LOGS
+# ============================================================================
+
+
+def page_logs():
+    """View changes and approvals logs."""
+    st.title("📋 Logs")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader("Changes Log")
+        with st.spinner("Loading changes log..."):
+            success, data = api_call("GET", "/logs/changes")
+
+        if success:
+            entries = data.get("entries", [])
+            if entries:
+                changes_list = []
+                for entry in entries[:50]:  # Show last 50
+                    changes_list.append({
+                        "Timestamp": entry.get("timestamp", "N/A")[:19],
+                        "Type": entry.get("type", "N/A"),
+                        "Details": entry.get("details", "N/A")[:50],
+                    })
+
+                if changes_list:
+                    df = pd.DataFrame(changes_list)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No changes log entries.")
+            else:
+                st.info("No changes log entries.")
+        else:
+            st.error(f"Failed to load changes log: {data}")
+
+    with col2:
+        st.subheader("Approvals Log")
+        with st.spinner("Loading approvals log..."):
+            success, data = api_call("GET", "/logs/approvals")
+
+        if success:
+            entries = data.get("entries", [])
+            if entries:
+                approvals_list = []
+                for entry in entries[:50]:  # Show last 50
+                    approvals_list.append({
+                        "Timestamp": entry.get("timestamp", "N/A")[:19],
+                        "Change ID": entry.get("change_id", "N/A")[:20],
+                        "Action": entry.get("action", "N/A"),
+                        "User": entry.get("approver", "N/A")[:20],
+                    })
+
+                if approvals_list:
+                    df = pd.DataFrame(approvals_list)
+                    st.dataframe(df, use_container_width=True, hide_index=True)
+                else:
+                    st.info("No approvals log entries.")
+            else:
+                st.info("No approvals log entries.")
+        else:
+            st.error(f"Failed to load approvals log: {data}")
+
+
+# ============================================================================
+# SIDEBAR CONFIGURATION
+# ============================================================================
+
+
+def sidebar_config():
+    """Display configuration info in sidebar."""
+    st.sidebar.title("⚙️ Configuration")
+
+    with st.sidebar.expander("Backend Configuration"):
+        st.write(f"**API Base URL:** {API_BASE_URL}")
+        st.write(f"**Backend Status:** ", end="")
+
+        # Quick health check
+        success, _ = api_call("GET", "/health")
+        if success:
+            st.write("✅ Online")
+        else:
+            st.write("❌ Offline")
+
+    with st.sidebar.expander("Storage"):
+        st.write("**File Storage:** JSON files")
+        st.write("**Location:** data/ folder")
+        st.write("**Change Files:** data/changes/")
+        st.write("**Metadata:** data/metadata/")
+
+    with st.sidebar.expander("LLM"):
+        st.write("**Model:** Claude 3.5 Sonnet")
+        st.write("**Max Tokens:** 1000")
+        st.write("**Caching:** Enabled")
+
+
+# ============================================================================
+# MAIN APPLICATION
+# ============================================================================
+
+
+def main():
+    """Main application entry point."""
+    # Sidebar navigation
+    sidebar_config()
+
+    st.sidebar.divider()
+
+    pages = {
+        "📊 Dashboard": page_dashboard,
+        "📤 Upload Excel": page_upload_excel,
+        "🔍 Review Changes": page_review_changes,
+        "✅ Approve Changes": page_approve_changes,
+        "📄 Master Document": page_master_document,
+        "📚 Version History": page_version_history,
+        "📋 Logs": page_logs,
+    }
+
+    selected_page = st.sidebar.radio("Navigation", list(pages.keys()))
+
+    st.sidebar.divider()
+
+    # Footer
+    st.sidebar.caption("CreditPolicyIQ v0.1.0")
+
+    # Display selected page
+    pages[selected_page]()
+
+
+if __name__ == "__main__":
+    main()
