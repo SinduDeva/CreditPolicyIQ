@@ -48,8 +48,11 @@ if [ ! -f ".env" ]; then
     echo "Creating .env from .env.example..."
     cp .env.example .env
     echo "✅ .env file created"
-    echo "⚠️  Please update .env with your Anthropic API key:"
-    echo "   ANTHROPIC_API_KEY=your-key-here"
+    echo ""
+    echo "📝 Configuration options:"
+    echo "   • Default: Mock provider (works without API key)"
+    echo "   • Optional: Add LLM_API_KEY for Anthropic or OpenAI"
+    echo "   • Edit .env to configure your preferred provider"
     echo ""
 fi
 
@@ -61,14 +64,18 @@ if [ -f ".env" ]; then
     set +a
 fi
 
-# Validate API key
-if [ -z "$ANTHROPIC_API_KEY" ]; then
-    echo "❌ Error: ANTHROPIC_API_KEY not configured"
-    echo "Please set it in .env file"
-    exit 1
+# Determine LLM configuration
+if [ -z "$LLM_PROVIDER" ]; then
+    LLM_PROVIDER="mock"
+    echo "📢 LLM_PROVIDER not set, defaulting to: mock (no API key needed)"
 fi
 
-echo "✅ Configuration validated"
+if [ -z "$LLM_API_KEY" ] && [ -n "$ANTHROPIC_API_KEY" ]; then
+    LLM_API_KEY="$ANTHROPIC_API_KEY"
+    echo "📢 Using ANTHROPIC_API_KEY for compatibility"
+fi
+
+echo "✅ Configuration loaded (Provider: $LLM_PROVIDER)"
 echo ""
 
 # Create data directories
