@@ -5,18 +5,9 @@ level = "info"
 # Maximum size for file uploads in MB (default: 200)
 maxUploadSize = 500
 
-# Show the sidebar on load
-showSidebarNavOnDesktop = true
-
 [server]
-# Determines if uploaded files are deleted after Streamlit stops running
+# Determines if app is run on save
 runOnSave = true
-
-# Set to False to disable the file watcher
-fileWatcherType = "poll"
-
-# Maximum age of cache in seconds (24 hours)
-maxCacheMessageSize = 200
 
 [theme]
 # Theme configuration
@@ -25,3 +16,4 @@ backgroundColor = "#ffffff"
 secondaryBackgroundColor = "#f0f2f6"
 textColor = "#31333F"
 font = "sans serif"
+
