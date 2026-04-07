@@ -127,6 +127,7 @@ class IntelligentExcelParser:
     def _detect_change_type(self, cell) -> Optional[str]:
         """
         Detect if cell is colored and return change type.
+        More tolerant of color variations and different Excel formats.
 
         Args:
             cell: openpyxl cell object
@@ -138,18 +139,123 @@ class IntelligentExcelParser:
             if not cell.fill or not cell.fill.start_color:
                 return None
 
-            color = str(cell.fill.start_color.rgb) if cell.fill.start_color.rgb else None
-            if not color:
+            color_obj = cell.fill.start_color
+
+            # Handle different color formats
+            if not hasattr(color_obj, 'rgb') or color_obj.rgb is None:
                 return None
 
-            # Check against color variations
-            for change_type, color_list in COLOR_VARIATIONS.items():
-                if color.upper() in [c.upper() for c in color_list]:
-                    return change_type
+            color_str = str(color_obj.rgb).upper() if color_obj.rgb else ""
 
-            return None
+            # Remove 'FF' prefix if present (openpyxl format)
+            if color_str.startswith('FF'):
+                color_str = color_str[2:]
+            elif len(color_str) >= 8 and color_str.startswith('FF'):
+                color_str = color_str[2:]
+
+            self.logger.debug(f"Detected color: {color_str}")
+
+            # Check against color variations with more tolerance
+            # YELLOW variations (light to dark)
+            yellow_colors = [
+                "FFFF00",  # Pure yellow
+                "FFFF00",  # Standard yellow
+                "FFFF99",  # Light yellow
+                "FFFF66",  # Light yellow
+                "FFFF33",  # Medium yellow
+                "FFCCCC",  # Light yellow variant
+                "FFFFCC",  # Cream/light yellow
+                "F4D03F",  # Highlight yellow
+                "F9E79F",  # Light highlight
+                "FEF5E7",  # Very light yellow
+            ]
+
+            # GREEN variations (light to dark)
+            green_colors = [
+                "00B050",  # Standard green
+                "00B050",  # Excel green
+                "70AD47",  # Light green
+                "92D050",  # Very light green
+                "00B050",  # Dark green
+                "52BE80",  # Medium green
+                "45B649",  # Forest green
+                "82C91E",  # Bright green
+                "ABEBC6",  # Light green
+            ]
+
+            # RED variations (light to dark)
+            red_colors = [
+                "FF0000",  # Pure red
+                "FF0000",  # Standard red
+                "C0504D",  # Dark red
+                "FF6B6B",  # Light red
+                "FF4444",  # Medium red
+                "E74C3C",  # Bright red
+                "F1948A",  # Light red
+                "FADBD8",  # Very light red
+                "D32F2F",  # Deep red
+            ]
+
+            # Check color matches (case-insensitive)
+            color_upper = color_str.upper()
+
+            if any(yellow.upper() in color_upper or color_upper in yellow.upper() for yellow in yellow_colors):
+                self.logger.debug(f"Matched color {color_str} as MODIFIED (yellow)")
+                return "MODIFIED"
+            elif any(green.upper() in color_upper or color_upper in green.upper() for green in green_colors):
+                self.logger.debug(f"Matched color {color_str} as NEW (green)")
+                return "NEW"
+            elif any(red.upper() in color_upper or color_upper in red.upper() for red in red_colors):
+                self.logger.debug(f"Matched color {color_str} as DELETED (red)")
+                return "DELETED"
+
+            # Try numeric similarity for fuzzy matching
+            return self._fuzzy_match_color(color_str)
+
         except Exception as e:
             self.logger.debug(f"Error detecting color: {e}")
+            return None
+
+    def _fuzzy_match_color(self, color_hex: str) -> Optional[str]:
+        """
+        Fuzzy match a color hex code to the nearest color type.
+        Handles cases where exact match isn't found.
+
+        Args:
+            color_hex: Hex color code (6 or 8 chars)
+
+        Returns:
+            Change type or None
+        """
+        try:
+            # Remove FF prefix if present
+            color_hex = color_hex.upper()
+            if color_hex.startswith('FF') and len(color_hex) > 6:
+                color_hex = color_hex[2:]
+
+            # Parse RGB components
+            if len(color_hex) < 6:
+                return None
+
+            r = int(color_hex[0:2], 16)
+            g = int(color_hex[2:4], 16)
+            b = int(color_hex[4:6], 16)
+
+            # Determine dominant color
+            if g > r and g > b and g > 150:  # Green dominant and bright
+                self.logger.debug(f"Fuzzy matched {color_hex} as NEW (green-dominant)")
+                return "NEW"
+            elif r > 150 and g > 150 and b < 100:  # Yellow (high R, high G, low B)
+                self.logger.debug(f"Fuzzy matched {color_hex} as MODIFIED (yellow-dominant)")
+                return "MODIFIED"
+            elif r > 150 and g < 100 and b < 100:  # Red (high R, low G, low B)
+                self.logger.debug(f"Fuzzy matched {color_hex} as DELETED (red-dominant)")
+                return "DELETED"
+
+            return None
+
+        except Exception as e:
+            self.logger.debug(f"Error in fuzzy color matching: {e}")
             return None
 
     def _extract_change(
