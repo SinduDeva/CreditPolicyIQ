@@ -208,32 +208,34 @@ class IntelligentExcelParser:
             return None
 
     def _get_cell_context(
-        self, worksheet, row_idx: int, col_idx: int, cell_text: str, context_range: int = 3
+        self, worksheet, row_idx: int, col_idx: int, cell_text: str, context_range: int = 5
     ) -> Dict[str, str]:
         """
         Get context from cells surrounding the colored cell.
+        Extracts both horizontal (same row) and vertical (different rows) context.
 
         Args:
             worksheet: The worksheet
             row_idx: Row index of the colored cell
             col_idx: Column index of the colored cell
             cell_text: The colored cell text
-            context_range: Number of cells to look around (default 3)
+            context_range: Number of cells to look around (default 5)
 
         Returns:
-            Dictionary with before/current/after context
+            Dictionary with before/current/after context and extracted keywords
         """
         context = {
             "before": "",
             "current": cell_text,
             "after": "",
             "all_text": cell_text,
+            "keywords": [],
         }
 
         # Get text from cells around the colored cell
         surrounding_texts = []
 
-        # Get context from same row (left and right)
+        # Get context from same row (left side)
         for c in range(max(1, col_idx - context_range), col_idx):
             try:
                 neighbor = worksheet.cell(row=row_idx, column=c)
@@ -242,7 +244,7 @@ class IntelligentExcelParser:
             except:
                 pass
 
-        context["before"] = " ".join(surrounding_texts[-3:]) if surrounding_texts else ""
+        context["before"] = " ".join(surrounding_texts[-5:]) if surrounding_texts else ""
 
         # Get context from cells below
         after_texts = []
@@ -254,12 +256,43 @@ class IntelligentExcelParser:
             except:
                 pass
 
-        context["after"] = " ".join(after_texts[:3]) if after_texts else ""
-        context["all_text"] = " ".join(
-            [context["before"], context["current"], context["after"]]
-        ).strip()
+        context["after"] = " ".join(after_texts[:5]) if after_texts else ""
+
+        # Build full text
+        full_text = f"{context['before']} {context['current']} {context['after']}".strip()
+        context["all_text"] = full_text
+
+        # Extract keywords that might help identify the section
+        context["keywords"] = self._extract_keywords_from_context(full_text)
 
         return context
+
+    def _extract_keywords_from_context(self, text: str) -> List[str]:
+        """
+        Extract potential section keywords from context text.
+
+        Args:
+            text: Combined context text
+
+        Returns:
+            List of keywords
+        """
+        keywords = []
+
+        # Common policy keywords
+        policy_keywords = [
+            "coverage", "deductible", "copay", "limit", "network",
+            "claim", "exclusion", "benefit", "premium", "term",
+            "mental", "dental", "vision", "pharmacy", "wellness",
+            "preventive", "emergency", "outpatient", "inpatient"
+        ]
+
+        text_lower = text.lower()
+        for keyword in policy_keywords:
+            if keyword in text_lower:
+                keywords.append(keyword)
+
+        return list(set(keywords))
 
     def _col_num_to_letter(self, col_num: int) -> str:
         """Convert column number to letter (1 -> A, 27 -> AA)."""

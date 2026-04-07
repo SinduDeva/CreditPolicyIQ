@@ -15,6 +15,7 @@ from utils.file_storage import file_storage
 from core.intelligent_excel_parser import IntelligentExcelParser
 from core.excel_parser import ExcelParser
 from core.change_detector import ChangeDetector
+from core.change_mapper import ChangeMapper
 from core.docx_handler import DocxHandler
 from core.llm_caller import LLMCaller
 from core.approval_workflow import ApprovalWorkflow
@@ -42,6 +43,7 @@ app.add_middleware(
 # Use intelligent parser that works with any Excel structure
 excel_parser = IntelligentExcelParser()
 change_detector = ChangeDetector()
+change_mapper = ChangeMapper()
 docx_handler = DocxHandler()
 approval_workflow = ApprovalWorkflow()
 llm_caller = None  # Lazy initialize due to API key requirement
@@ -147,6 +149,27 @@ async def upload_excel(file: UploadFile = File(...)) -> Dict[str, Any]:
         )
 
         detected_changes = detection_result.get("detected_changes", [])
+
+        # Enhance changes with intelligent mapping information
+        docx_handler = DocxHandler()
+        master_structure = docx_handler.extract_structure(config.master_docx)
+
+        enhanced_changes = []
+        for change in detected_changes:
+            # Get intelligent mapping for this change
+            mapping_result = change_mapper.map_change_to_section(
+                change.get("original_data", {}),
+                master_structure
+            )
+
+            # Add mapping info to change
+            change["mapping"] = mapping_result
+            change["mapping_confidence"] = mapping_result.get("confidence", 0)
+            change["suggested_section"] = mapping_result.get("section_title", "Unknown")
+
+            enhanced_changes.append(change)
+
+        detected_changes = enhanced_changes
 
         # Save changes to JSON files
         for change in detected_changes:
