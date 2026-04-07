@@ -680,6 +680,249 @@ def page_logs():
 
 
 # ============================================================================
+# UNIFIED REVIEW PAGE (3-Pane Interface)
+# ============================================================================
+
+
+def page_unified_review():
+    """
+    Unified review interface with three panes:
+    Left: Master document and files
+    Center: Detected changes with suggestions
+    Right: Redline review (proposed changes)
+    """
+    st.title("📋 Policy Review - Unified Interface")
+
+    # Create three columns
+    col_left, col_center, col_right = st.columns([1, 1.5, 1.5], gap="large")
+
+    # ============================================================================
+    # LEFT PANE: MASTER FILES
+    # ============================================================================
+    with col_left:
+        st.subheader("📄 Master Files")
+
+        with st.container(border=True):
+            st.write("**Current Master Document**")
+
+            # Check if master exists
+            master_path = Path("data/master_policy.docx")
+            if master_path.exists():
+                file_size = master_path.stat().st_size / (1024 * 1024)
+                st.success(f"✅ Loaded: {master_path.name}")
+                st.caption(f"Size: {file_size:.2f} MB")
+
+                if st.button("📥 Download Master", key="download_master_left"):
+                    with open(master_path, "rb") as f:
+                        st.download_button(
+                            label="Download",
+                            data=f.read(),
+                            file_name="master_policy.docx"
+                        )
+            else:
+                st.warning("⚠️ No master document uploaded yet")
+                st.write("Upload a master document to begin:")
+
+                uploaded_file = st.file_uploader(
+                    "Choose Master Document",
+                    type=["docx"],
+                    key="upload_master_left"
+                )
+
+                if uploaded_file:
+                    Path("data").mkdir(parents=True, exist_ok=True)
+                    with open(master_path, "wb") as f:
+                        f.write(uploaded_file.getbuffer())
+                    st.success("✅ Master document uploaded!")
+                    st.rerun()
+
+        st.divider()
+
+        with st.container(border=True):
+            st.write("**Upload Technical Document**")
+            st.write("(Excel with highlighted changes)")
+
+            uploaded_excel = st.file_uploader(
+                "Choose Excel File",
+                type=["xlsx"],
+                key="upload_excel_left"
+            )
+
+            if uploaded_excel:
+                st.info(f"📄 {uploaded_excel.name}")
+                if st.button("🔍 Analyze Changes", key="analyze_left"):
+                    with st.spinner("Analyzing changes..."):
+                        # Save file temporarily
+                        temp_path = Path("data/uploads") / uploaded_excel.name
+                        Path("data/uploads").mkdir(parents=True, exist_ok=True)
+                        with open(temp_path, "wb") as f:
+                            f.write(uploaded_excel.getbuffer())
+
+                        # Upload via API
+                        files = {"file": open(temp_path, "rb")}
+                        try:
+                            response = requests.post(
+                                f"{API_BASE_URL}/upload-excel",
+                                files=files
+                            )
+                            if response.status_code == 200:
+                                st.success(f"✅ Detected {response.json().get('total_changes', 0)} changes!")
+                                st.rerun()
+                            else:
+                                st.error(f"Upload failed: {response.json().get('detail', 'Unknown error')}")
+                        except Exception as e:
+                            st.error(f"Error: {e}")
+
+    # ============================================================================
+    # CENTER PANE: DETECTED CHANGES
+    # ============================================================================
+    with col_center:
+        st.subheader("🔍 Detected Changes")
+
+        # Get pending changes
+        success, changes_data = api_call("GET", "/changes/pending")
+
+        if not success or not changes_data.get("changes"):
+            with st.container(border=True):
+                st.info("📭 No changes detected yet. Upload an Excel file with highlighted cells to get started.")
+        else:
+            changes = changes_data.get("changes", [])
+
+            for idx, change in enumerate(changes):
+                with st.container(border=True):
+                    change_type = change.get("Change_Type", "OTHER")
+                    change_id = change.get("change_id", f"Change_{idx}")
+
+                    # Color indicator
+                    if change_type == "NEW":
+                        color_indicator = "🟢"
+                    elif change_type == "MODIFIED":
+                        color_indicator = "🟡"
+                    elif change_type == "DELETED":
+                        color_indicator = "🔴"
+                    else:
+                        color_indicator = "⚪"
+
+                    st.write(f"**{color_indicator} {change_type}** - {change_id}")
+
+                    # Change content
+                    content = change.get("Policy_Content", "")
+                    st.code(content, language="text")
+
+                    # Mapping info
+                    mapping = change.get("mapping", {})
+                    if mapping:
+                        confidence = mapping.get("confidence", 0)
+                        section = mapping.get("section_title", "Unknown")
+                        st.caption(f"📍 Maps to: **{section}** ({confidence:.0%} confidence)")
+
+                    # Action buttons
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        if st.button("✅ Accept", key=f"accept_{idx}", use_container_width=True):
+                            success, _ = api_call("POST", f"/changes/{change_id}/approve", {
+                                "user": "reviewer",
+                                "comment": "Accepted from unified review"
+                            })
+                            if success:
+                                st.success("✅ Accepted!")
+                                st.rerun()
+                    with col2:
+                        if st.button("✏️ Edit", key=f"edit_{idx}", use_container_width=True):
+                            st.session_state[f"editing_{idx}"] = True
+                    with col3:
+                        if st.button("❌ Reject", key=f"reject_{idx}", use_container_width=True):
+                            success, _ = api_call("POST", f"/changes/{change_id}/reject", {
+                                "reason": "Rejected from unified review"
+                            })
+                            if success:
+                                st.error("❌ Rejected!")
+                                st.rerun()
+
+                    # Edit mode
+                    if st.session_state.get(f"editing_{idx}"):
+                        new_content = st.text_area(
+                            "Edit content:",
+                            value=content,
+                            key=f"edit_content_{idx}",
+                            height=100
+                        )
+                        col1, col2 = st.columns(2)
+                        with col1:
+                            if st.button("💾 Save Edit", key=f"save_edit_{idx}", use_container_width=True):
+                                success, _ = api_call("POST", f"/changes/{change_id}/edit-suggestion", {
+                                    "edited_narrative": new_content,
+                                    "edit_notes": "Edited from unified review"
+                                })
+                                if success:
+                                    st.success("✅ Saved!")
+                                    st.session_state[f"editing_{idx}"] = False
+                                    st.rerun()
+                        with col2:
+                            if st.button("Cancel", key=f"cancel_edit_{idx}", use_container_width=True):
+                                st.session_state[f"editing_{idx}"] = False
+
+    # ============================================================================
+    # RIGHT PANE: REDLINE REVIEW
+    # ============================================================================
+    with col_right:
+        st.subheader("📝 Redline Review")
+
+        with st.container(border=True):
+            st.write("**Preview of Updated Document**")
+            st.info("Shows how the master document will look after applying approved changes")
+
+            # Get statistics
+            success, changes_data = api_call("GET", "/changes/pending")
+            all_changes = changes_data.get("changes", []) if success else []
+
+            approved_count = sum(1 for c in all_changes if c.get("status") == "APPROVED")
+            pending_count = sum(1 for c in all_changes if c.get("status") == "PENDING")
+            rejected_count = sum(1 for c in all_changes if c.get("status") == "REJECTED")
+
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("✅ Approved", approved_count)
+            with col2:
+                st.metric("⏳ Pending", pending_count)
+            with col3:
+                st.metric("❌ Rejected", rejected_count)
+
+            st.divider()
+
+            # Document preview
+            st.write("**Approved Changes Summary**")
+            if approved_count > 0:
+                approved = [c for c in all_changes if c.get("status") == "APPROVED"]
+                for c in approved:
+                    st.write(f"- {c.get('Change_Type')}: {c.get('Policy_Content', '')[:50]}...")
+            else:
+                st.caption("No approved changes yet")
+
+            st.divider()
+
+            # Action buttons
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Apply All Approved", use_container_width=True):
+                    with st.spinner("Applying changes..."):
+                        success, result = api_call("POST", "/master/apply-changes")
+                        if success:
+                            st.success("✅ Changes applied to master document!")
+                            st.rerun()
+                        else:
+                            st.error(f"Error: {result}")
+            with col2:
+                if st.button("📥 Download Updated", use_container_width=True):
+                    success, file_data = api_call("GET", "/master/current", is_file=True)
+                    if success:
+                        st.download_button(
+                            "Download",
+                            data=file_data,
+                            file_name="master_policy_updated.docx"
+                        )
+
+# ============================================================================
 # SETTINGS PAGE
 # ============================================================================
 
@@ -870,7 +1113,8 @@ def main():
     st.sidebar.divider()
 
     pages = {
-        "📊 Dashboard": page_dashboard,
+        "🏠 Home": page_dashboard,
+        "📋 Unified Review": page_unified_review,
         "📤 Upload Excel": page_upload_excel,
         "🔍 Review Changes": page_review_changes,
         "✅ Approve Changes": page_approve_changes,
