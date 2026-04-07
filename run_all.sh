@@ -10,21 +10,33 @@ echo "CreditPolicyIQ - Complete Setup & Start"
 echo "=========================================="
 echo ""
 
-# Check if Python is installed
-if ! command -v python3 &> /dev/null; then
-    echo "❌ Error: Python 3 is not installed"
+# Find Python executable (try python3 first, fallback to python)
+PYTHON_CMD=""
+if command -v python3 &> /dev/null; then
+    PYTHON_CMD="python3"
+elif command -v python &> /dev/null; then
+    PYTHON_CMD="python"
+fi
+
+if [ -z "$PYTHON_CMD" ]; then
+    echo "❌ Error: Python is not installed or not in PATH"
     echo "Please install Python 3.9 or higher"
+    echo ""
+    echo "Installation options:"
+    echo "  • Ubuntu/Debian: sudo apt-get install python3"
+    echo "  • macOS: brew install python3"
+    echo "  • Windows: Download from https://python.org/"
     exit 1
 fi
 
-echo "✅ Python version:"
-python3 --version
+echo "✅ Python found:"
+$PYTHON_CMD --version
 echo ""
 
 # Check if virtual environment exists
 if [ ! -d "venv" ]; then
     echo "📦 Creating virtual environment..."
-    python3 -m venv venv
+    $PYTHON_CMD -m venv venv
     echo "✅ Virtual environment created"
     echo ""
 fi
@@ -100,7 +112,8 @@ echo ""
 
 # Start backend in background
 echo "1️⃣  Starting FastAPI backend on port 8000..."
-python3 app.py &
+# Use bash -c to ensure venv is active in the background process
+bash -c "source venv/bin/activate && python3 app.py" &
 BACKEND_PID=$!
 echo "   Backend PID: $BACKEND_PID"
 echo ""
