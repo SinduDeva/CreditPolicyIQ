@@ -243,6 +243,8 @@ async def upload_master(file: UploadFile = File(...)) -> Dict[str, Any]:
 
         # Backup existing master document if it exists
         master_path = Path(config.master_docx)
+        backup_path = None  # Initialize as None
+
         if master_path.exists():
             backup_dir = Path("data/backups")
             backup_dir.mkdir(parents=True, exist_ok=True)
@@ -258,6 +260,15 @@ async def upload_master(file: UploadFile = File(...)) -> Dict[str, Any]:
         with open(master_path, "wb") as f:
             f.write(contents)
 
+        # Verify file was saved
+        if not master_path.exists():
+            logger.error(f"Failed to save master document to {master_path}")
+            raise HTTPException(
+                status_code=500, detail="Failed to save master document"
+            )
+
+        logger.info(f"Master document saved to {master_path} ({len(contents)} bytes)")
+
         # Extract and validate document structure
         try:
             docx_handler.extract_structure(str(master_path))
@@ -272,6 +283,7 @@ async def upload_master(file: UploadFile = File(...)) -> Dict[str, Any]:
                 "filename": file.filename,
                 "size": len(contents),
                 "action": "master_document_uploaded",
+                "saved_to": str(master_path),
             },
         )
 
@@ -282,7 +294,8 @@ async def upload_master(file: UploadFile = File(...)) -> Dict[str, Any]:
             "filename": file.filename,
             "size": len(contents),
             "message": "Master document updated successfully",
-            "backup_path": str(backup_path) if master_path.exists() else None,
+            "saved_to": str(master_path),
+            "backup_path": str(backup_path) if backup_path else None,
         }
 
     except HTTPException:
