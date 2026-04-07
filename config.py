@@ -36,6 +36,37 @@ class Config:
             self.config_data.get("model", self._get_default_model(self.llm_provider)),
         )
 
+        # Change detection colors configuration
+        # YELLOW: Changes (additions, modifications)
+        # GREY: Deletions
+        # Set to empty list to detect all colors
+        self.highlight_colors = {
+            "YELLOW": [
+                "FFFF00",  # Pure yellow
+                "FFFF99",  # Light yellow
+                "FFFF66",  # Light yellow variant
+                "FFFF33",  # Medium yellow
+                "FFFFCC",  # Cream/light yellow
+                "F4D03F",  # Highlight yellow
+                "F9E79F",  # Light highlight
+                "FEF5E7",  # Very light yellow
+            ],
+            "GREY": [
+                "808080", "7F7F7F", "A9A9A9", "D3D3D3",
+                "C0C0C0", "E8E8E8", "696969", "BEBEBE",
+            ]
+        }
+
+        # Override from config file or environment
+        if "highlight_colors" in self.config_data:
+            self.highlight_colors = self.config_data["highlight_colors"]
+
+        # Change detection mode: 'yellow_only', 'all_colors', 'configurable'
+        self.change_detection_mode = os.getenv(
+            "CHANGE_DETECTION_MODE",
+            self.config_data.get("change_detection_mode", "yellow_only")
+        )
+
     def _get_default_model(self, provider: str) -> str:
         """Get default model for a given provider."""
         defaults = {
@@ -55,6 +86,8 @@ class Config:
             "excel_path": self.excel_path,
             "max_tokens": self.max_tokens,
             "data_dir": str(self.data_dir),
+            "change_detection_mode": self.change_detection_mode,
+            "highlight_colors": {k: len(v) for k, v in self.highlight_colors.items()},
         }
 
 
