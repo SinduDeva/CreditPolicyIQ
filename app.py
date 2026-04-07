@@ -305,6 +305,40 @@ async def upload_master(file: UploadFile = File(...)) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/master/current-status")
+async def get_master_status() -> Dict[str, Any]:
+    """
+    Get status of current master DOCX file.
+
+    Returns:
+        Status with exists flag, size, and modified time
+    """
+    try:
+        master_path = Path(config.master_docx)
+
+        if not master_path.exists():
+            return {
+                "exists": False,
+                "message": "No master document uploaded yet"
+            }
+
+        stat = master_path.stat()
+        return {
+            "exists": True,
+            "filename": master_path.name,
+            "size": stat.st_size,
+            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            "path": str(master_path),
+        }
+
+    except Exception as e:
+        logger.error(f"Error in get_master_status: {e}")
+        return {
+            "exists": False,
+            "error": str(e)
+        }
+
+
 @app.get("/api/master/current")
 async def get_master_current() -> FileResponse:
     """

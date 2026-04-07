@@ -31,7 +31,7 @@ def api_call(
         method: HTTP method (GET, POST, etc.)
         endpoint: API endpoint path
         json_data: JSON body data
-        files: Files to upload
+        files: Files to upload (dict with file objects or bytes)
 
     Returns:
         Tuple of (success, response_data)
@@ -44,7 +44,16 @@ def api_call(
             response = requests.get(url, timeout=REQUEST_TIMEOUT)
         elif method == "POST":
             if files:
-                response = requests.post(url, files=files, timeout=REQUEST_TIMEOUT)
+                # For file uploads, prepare files dict properly
+                prepared_files = {}
+                if isinstance(files, dict):
+                    for key, file_obj in files.items():
+                        if hasattr(file_obj, 'read'):
+                            prepared_files[key] = file_obj
+                        else:
+                            # If it's bytes, wrap it
+                            prepared_files[key] = ("file", file_obj)
+                response = requests.post(url, files=prepared_files, timeout=REQUEST_TIMEOUT)
             else:
                 headers["Content-Type"] = "application/json"
                 response = requests.post(
@@ -54,7 +63,11 @@ def api_call(
             return False, "Unsupported HTTP method"
 
         if response.status_code == 200:
-            return True, response.json()
+            try:
+                return True, response.json()
+            except ValueError:
+                # If response is not JSON (e.g., file download), return raw content
+                return True, response.content
         else:
             error_msg = response.text or f"HTTP {response.status_code}"
             return False, error_msg
@@ -705,20 +718,24 @@ def page_unified_review():
         with st.container(border=True):
             st.write("**Current Master Document**")
 
-            # Check if master exists
-            master_path = Path("data/master_policy.docx")
-            if master_path.exists():
-                file_size = master_path.stat().st_size / (1024 * 1024)
-                st.success(f"✅ Loaded: {master_path.name}")
+            # Check if master exists via API
+            success, master_data = api_call("GET", "/master/current-status")
+
+            if success and master_data.get("exists"):
+                file_size = master_data.get("size", 0) / (1024 * 1024)
+                st.success(f"✅ Loaded: master_policy.docx")
                 st.caption(f"Size: {file_size:.2f} MB")
 
                 if st.button("📥 Download Master", key="download_master_left"):
-                    with open(master_path, "rb") as f:
+                    success, download_data = api_call("GET", "/master/current")
+                    if success:
                         st.download_button(
-                            label="Download",
-                            data=f.read(),
+                            label="Download Master Document",
+                            data=download_data,
                             file_name="master_policy.docx"
                         )
+                    else:
+                        st.error("Could not download master document")
             else:
                 st.warning("⚠️ No master document uploaded yet")
                 st.write("Upload a master document to begin:")
@@ -730,11 +747,18 @@ def page_unified_review():
                 )
 
                 if uploaded_file:
-                    Path("data").mkdir(parents=True, exist_ok=True)
-                    with open(master_path, "wb") as f:
-                        f.write(uploaded_file.getbuffer())
-                    st.success("✅ Master document uploaded!")
-                    st.rerun()
+                    if st.button("⬆️ Upload Master", key="upload_master_btn_left"):
+                        with st.spinner("Uploading master document..."):
+                            # Call API endpoint for proper handling
+                            files = {"file": ("master_policy.docx", uploaded_file.getbuffer(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+                            success, response = api_call("POST", "/upload-master", files=files)
+
+                            if success:
+                                saved_path = response.get("saved_to", "master_policy.docx")
+                                st.success(f"✅ Master document uploaded! Saved to: {saved_path}")
+                                st.rerun()
+                            else:
+                                st.error(f"Upload failed: {response}")
 
         st.divider()
 
@@ -752,26 +776,16 @@ def page_unified_review():
                 st.info(f"📄 {uploaded_excel.name}")
                 if st.button("🔍 Analyze Changes", key="analyze_left"):
                     with st.spinner("Analyzing changes..."):
-                        # Save file temporarily
-                        temp_path = Path("data/uploads") / uploaded_excel.name
-                        Path("data/uploads").mkdir(parents=True, exist_ok=True)
-                        with open(temp_path, "wb") as f:
-                            f.write(uploaded_excel.getbuffer())
-
                         # Upload via API
-                        files = {"file": open(temp_path, "rb")}
-                        try:
-                            response = requests.post(
-                                f"{API_BASE_URL}/upload-excel",
-                                files=files
-                            )
-                            if response.status_code == 200:
-                                st.success(f"✅ Detected {response.json().get('total_changes', 0)} changes!")
-                                st.rerun()
-                            else:
-                                st.error(f"Upload failed: {response.json().get('detail', 'Unknown error')}")
-                        except Exception as e:
-                            st.error(f"Error: {e}")
+                        files = {"file": (uploaded_excel.name, uploaded_excel.getbuffer(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+                        success, response = api_call("POST", "/upload-excel", files=files)
+
+                        if success:
+                            total_changes = response.get("total_changes", 0)
+                            st.success(f"✅ Detected {total_changes} changes!")
+                            st.rerun()
+                        else:
+                            st.error(f"Upload failed: {response}")
 
     # ============================================================================
     # CENTER PANE: DETECTED CHANGES
