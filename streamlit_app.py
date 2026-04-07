@@ -418,7 +418,15 @@ if not changes:
     </div>
     """, unsafe_allow_html=True)
 else:
-    st.markdown(f"**{len(changes)} changes detected**")
+    total_changes = len(changes)
+    mapped_changes = len([c for c in changes if c.get("mapping", {}).get("confidence", 0) > 0])
+    pending_mapping = total_changes - mapped_changes
+
+    if pending_mapping > 0:
+        st.markdown(f"**{total_changes} changes detected**")
+        st.info(f"📊 {mapped_changes} mapped with sections · {pending_mapping} pending smart mapping")
+    else:
+        st.markdown(f"**{total_changes} changes detected & mapped**")
 
     for idx, change in enumerate(changes):
         change_type = change.get("Change_Type", "CHANGE")
