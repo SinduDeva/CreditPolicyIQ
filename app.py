@@ -586,14 +586,14 @@ async def edit_suggestion(
 
 @app.post("/api/changes/{change_id}/approve")
 async def approve_change(
-    change_id: str, body: Dict[str, str] = Body(...)
+    change_id: str, body: Dict[str, Any] = Body(...)
 ) -> Dict[str, Any]:
     """
     Approve a change.
 
     Args:
         change_id: ID of change to approve
-        body: JSON body with user and comment
+        body: JSON body with user, comment, and optional change_type
 
     Returns:
         Approval status
@@ -601,9 +601,10 @@ async def approve_change(
     try:
         user = body.get("user", "unknown")
         comment = body.get("comment", "")
+        change_type = body.get("change_type")  # Optional: if user selected a type
 
         # Approve change
-        success = approval_workflow.approve_change(change_id, user, comment)
+        success = approval_workflow.approve_change(change_id, user, comment, change_type)
 
         if not success:
             logger.warning(f"Failed to approve change {change_id}")
@@ -619,10 +620,11 @@ async def approve_change(
                 "approver": user,
                 "action": "APPROVED",
                 "comment": comment,
+                "change_type": change_type,
             },
         )
 
-        logger.info(f"Approved change {change_id} by {user}")
+        logger.info(f"Approved change {change_id} by {user} (type: {change_type})")
 
         return {
             "status": "success",
