@@ -31,7 +31,7 @@ def api_call(
         method: HTTP method (GET, POST, etc.)
         endpoint: API endpoint path
         json_data: JSON body data
-        files: Files to upload (dict with file objects or bytes)
+        files: Files to upload (dict with file objects, bytes, or tuples)
 
     Returns:
         Tuple of (success, response_data)
@@ -44,16 +44,11 @@ def api_call(
             response = requests.get(url, timeout=REQUEST_TIMEOUT)
         elif method == "POST":
             if files:
-                # For file uploads, prepare files dict properly
-                prepared_files = {}
-                if isinstance(files, dict):
-                    for key, file_obj in files.items():
-                        if hasattr(file_obj, 'read'):
-                            prepared_files[key] = file_obj
-                        else:
-                            # If it's bytes, wrap it
-                            prepared_files[key] = ("file", file_obj)
-                response = requests.post(url, files=prepared_files, timeout=REQUEST_TIMEOUT)
+                # Files can be passed directly - requests handles:
+                # - file objects with .read()
+                # - tuples: (filename, fileobj, content_type)
+                # - bytes are wrapped: (filename, bytes, content_type)
+                response = requests.post(url, files=files, timeout=REQUEST_TIMEOUT)
             else:
                 headers["Content-Type"] = "application/json"
                 response = requests.post(
@@ -750,7 +745,8 @@ def page_unified_review():
                     if st.button("⬆️ Upload Master", key="upload_master_btn_left"):
                         with st.spinner("Uploading master document..."):
                             # Call API endpoint for proper handling
-                            files = {"file": ("master_policy.docx", uploaded_file.getbuffer(), "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+                            file_bytes = uploaded_file.getvalue()
+                            files = {"file": ("master_policy.docx", file_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
                             success, response = api_call("POST", "/upload-master", files=files)
 
                             if success:
@@ -777,7 +773,8 @@ def page_unified_review():
                 if st.button("🔍 Analyze Changes", key="analyze_left"):
                     with st.spinner("Analyzing changes..."):
                         # Upload via API
-                        files = {"file": (uploaded_excel.name, uploaded_excel.getbuffer(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
+                        file_bytes = uploaded_excel.getvalue()
+                        files = {"file": (uploaded_excel.name, file_bytes, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
                         success, response = api_call("POST", "/upload-excel", files=files)
 
                         if success:
