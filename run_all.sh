@@ -70,8 +70,21 @@ echo ""
 
 # Install/upgrade dependencies
 echo "📥 Installing dependencies..."
-pip install -q --upgrade pip
-pip install -q -r requirements.txt
+
+# Try to upgrade pip (non-critical, continue if fails)
+echo "   Checking pip version..."
+pip install --upgrade pip 2>/dev/null || {
+    echo "   ⚠️  Pip upgrade skipped (using current version)"
+}
+
+# Install requirements
+echo "   Installing packages from requirements.txt..."
+pip install -r requirements.txt || {
+    echo "❌ Error: Failed to install dependencies"
+    echo "   Please check your internet connection and try again"
+    exit 1
+}
+
 echo "✅ Dependencies installed"
 echo ""
 
