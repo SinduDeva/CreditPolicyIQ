@@ -13,7 +13,7 @@ st.set_page_config(
 
 # API Configuration
 API_BASE_URL = "http://localhost:8000/api"
-REQUEST_TIMEOUT = 10
+REQUEST_TIMEOUT = 120  # Large files need time to process
 
 # Custom CSS for production look
 st.markdown("""
@@ -291,9 +291,12 @@ with col_master:
                         success, response = api_call("POST", "/upload-master", files=files)
 
                         if success:
-                            st.markdown("""
+                            sections = response.get("sections_indexed", 0) if isinstance(response, dict) else 0
+                            paras = response.get("paragraphs_indexed", 0) if isinstance(response, dict) else 0
+                            st.markdown(f"""
                             <div class="status-box status-success">
-                                ✅ Master document uploaded successfully!
+                                ✅ Master document uploaded & indexed!<br>
+                                <small>{sections} sections &nbsp;·&nbsp; {paras} paragraphs ready for mapping</small>
                             </div>
                             """, unsafe_allow_html=True)
                             st.rerun()
@@ -418,71 +421,81 @@ else:
     st.markdown(f"**{len(changes)} changes detected**")
 
     for idx, change in enumerate(changes):
-        st.markdown(f'<div class="change-item">', unsafe_allow_html=True)
-
         change_type = change.get("Change_Type", "CHANGE")
         change_id = change.get("change_id", f"Change_{idx}")
-
-        # Determine icon
-        if change_type == "NEW":
-            icon = "🟢"
-        elif change_type == "MODIFIED":
-            icon = "🟡"
-        elif change_type == "DELETED":
-            icon = "🔴"
-        else:
-            icon = "🔵"
-
-        col_header, col_actions = st.columns([2, 1])
-
-        with col_header:
-            st.markdown(f"**{icon} {change_type}** - {change_id}")
-
-            # Type selector for CHANGE type
-            if change_type == "CHANGE":
-                selected_type = st.selectbox(
-                    "Select type",
-                    ["NEW", "MODIFIED", "DELETED"],
-                    key=f"type_{idx}",
-                    label_visibility="collapsed"
-                )
-                if selected_type and selected_type != "CHANGE":
-                    change["Change_Type"] = selected_type
-
-        # Content
         content = change.get("Policy_Content", "")
-        st.markdown(f"```\n{content}\n```")
-
-        # Mapping
         mapping = change.get("mapping", {})
-        if mapping:
-            confidence = mapping.get("confidence", 0)
-            section = mapping.get("section_title", "Unknown")
-            st.caption(f"📍 Maps to: **{section}** ({confidence:.0%} confidence)")
+        source = change.get("source", {})
 
-        # Buttons
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            if st.button("✅ Accept", key=f"accept_{idx}", use_container_width=True):
-                success, _ = api_call("POST", f"/changes/{change_id}/approve", {
-                    "user": "reviewer",
-                    "comment": "Approved",
-                    "change_type": change.get("Change_Type", change_type)
-                })
-                if success:
-                    st.success("✅ Accepted!")
-                    st.rerun()
+        # Badge colors
+        badge_color = {"NEW": "#28a745", "MODIFIED": "#ffc107", "DELETED": "#dc3545",
+                       "CHANGE": "#17a2b8"}.get(change_type, "#6c757d")
+        badge_label = {"NEW": "🟢 NEW", "MODIFIED": "🟡 MODIFIED",
+                       "DELETED": "🔴 DELETED", "CHANGE": "🔵 CHANGE"}.get(change_type, change_type)
 
-        with col2:
-            if st.button("❌ Reject", key=f"reject_{idx}", use_container_width=True):
-                success, _ = api_call("POST", f"/changes/{change_id}/reject", {
-                    "reason": "Rejected by reviewer"
-                })
-                if success:
-                    st.error("❌ Rejected!")
-                    st.rerun()
+        with st.expander(
+            f"{badge_label}  |  {content[:80]}{'…' if len(content) > 80 else ''}",
+            expanded=(idx < 5)  # Auto-open first 5
+        ):
+            col_left, col_right = st.columns(2, gap="medium")
 
-        st.markdown('</div>', unsafe_allow_html=True)
+            with col_left:
+                st.markdown("**📋 Change from Technical Document**")
+                st.code(content, language="text")
+
+                # Source info
+                sheet = source.get("sheet", "")
+                cell_ref = source.get("cell_ref", "")
+                if sheet or cell_ref:
+                    st.caption(f"Source: {sheet} {cell_ref}")
+
+            with col_right:
+                section_title = mapping.get("section_title", "")
+                matched_text = mapping.get("matched_text", "")
+                confidence = mapping.get("confidence", 0)
+
+                if section_title:
+                    st.markdown(f"**📍 Suggested location in Master**")
+                    st.markdown(f"Section: **{section_title}** ({confidence:.0%} match)")
+                    if matched_text:
+                        st.code(matched_text[:300], language="text")
+                else:
+                    st.markdown("**📍 Master Document Location**")
+                    st.info("No matching section found — will be added as new content")
+
+            # Type selector row
+            col_type, col_accept, col_reject = st.columns([2, 1, 1])
+
+            with col_type:
+                if change_type == "CHANGE":
+                    resolved_type = st.selectbox(
+                        "Change type",
+                        ["NEW", "MODIFIED", "DELETED"],
+                        key=f"type_{idx}",
+                    )
+                    change["Change_Type"] = resolved_type
+                else:
+                    resolved_type = change_type
+                    st.markdown(f"Type: **{change_type}**")
+
+            with col_accept:
+                if st.button("✅ Accept", key=f"accept_{idx}", use_container_width=True):
+                    ok, _ = api_call("POST", f"/changes/{change_id}/approve", {
+                        "user": "reviewer",
+                        "comment": "Accepted",
+                        "change_type": change.get("Change_Type", resolved_type),
+                    })
+                    if ok:
+                        st.success("Accepted")
+                        st.rerun()
+
+            with col_reject:
+                if st.button("❌ Reject", key=f"reject_{idx}", use_container_width=True):
+                    ok, _ = api_call("POST", f"/changes/{change_id}/reject", {
+                        "reason": "Rejected"
+                    })
+                    if ok:
+                        st.rerun()
 
 st.markdown('</div>', unsafe_allow_html=True)
 

@@ -40,13 +40,36 @@ app.add_middleware(
 )
 
 # Initialize core modules
-# Use intelligent parser that works with any Excel structure
 excel_parser = IntelligentExcelParser()
 change_detector = ChangeDetector()
 change_mapper = ChangeMapper()
 docx_handler = DocxHandler()
 approval_workflow = ApprovalWorkflow()
 llm_caller = None  # Lazy initialize due to API key requirement
+
+# In-memory master structure cache (rebuilt on upload)
+_master_structure_cache: Optional[Dict] = None
+
+
+def _get_master_structure() -> Optional[Dict]:
+    """Return cached master structure, loading from disk if needed."""
+    global _master_structure_cache
+    master_path = Path(config.master_docx)
+    if not master_path.exists():
+        return None
+    if _master_structure_cache is None:
+        logger.info("Building master document structure cache...")
+        _master_structure_cache = docx_handler.extract_structure(str(master_path))
+        sections = len(_master_structure_cache.get("sections", []))
+        paras = len(_master_structure_cache.get("paragraphs", []))
+        logger.info(f"Master structure cached: {sections} sections, {paras} paragraphs")
+    return _master_structure_cache
+
+
+def _invalidate_master_cache():
+    """Clear master structure cache (call after master is replaced)."""
+    global _master_structure_cache
+    _master_structure_cache = None
 
 
 @app.on_event("startup")
@@ -77,134 +100,86 @@ async def shutdown_event():
 
 @app.post("/api/upload-excel")
 async def upload_excel(file: UploadFile = File(...)) -> Dict[str, Any]:
-    """
-    Upload and parse Excel file with policy changes.
-
-    Args:
-        file: Excel file (.xlsx)
-
-    Returns:
-        Upload status with parsed changes and summary
-    """
+    """Upload and parse Excel file with policy changes."""
     try:
-        # Validate file type
         if not file.filename.endswith(".xlsx"):
-            logger.warning(f"Invalid file type uploaded: {file.filename}")
-            raise HTTPException(
-                status_code=400, detail="File must be .xlsx format"
-            )
+            raise HTTPException(status_code=400, detail="File must be .xlsx format")
 
-        # Save uploaded file
         upload_dir = Path("data/uploads")
         upload_dir.mkdir(parents=True, exist_ok=True)
         file_path = upload_dir / file.filename
 
         contents = await file.read()
-        # Validate file size (max 10MB default)
-        max_size = 10 * 1024 * 1024
+        max_size = 100 * 1024 * 1024  # 100MB
         if len(contents) > max_size:
-            logger.warning(
-                f"File too large: {file.filename} ({len(contents)} bytes)"
-            )
-            raise HTTPException(
-                status_code=400,
-                detail=f"File size exceeds {max_size / 1024 / 1024}MB limit",
-            )
+            raise HTTPException(status_code=400, detail=f"File size exceeds 100MB limit")
 
         with open(file_path, "wb") as f:
             f.write(contents)
+        logger.info(f"File uploaded: {file.filename} ({len(contents)} bytes)")
 
-        logger.info(f"File uploaded: {file.filename}")
-
-        # Parse Excel file
+        # Parse Excel - extract highlighted cells
         parse_result = excel_parser.parse_excel(str(file_path))
-
         if "error" in parse_result:
-            logger.error(f"Error parsing Excel: {parse_result['error']}")
             raise HTTPException(status_code=400, detail=parse_result["error"])
 
-        # Convert intelligent parser output to change_detector format
         parsed_changes = parse_result.get("parsed_changes", [])
-        converted_changes = []
+        logger.info(f"Detected {len(parsed_changes)} highlighted changes")
 
+        # Load master structure once (cached)
+        master_structure = _get_master_structure()
+
+        # Build changes with context — map each to master section
+        saved_changes = []
         for change in parsed_changes:
-            # Extract section name from context or use default
             context = change.get("context", {})
-            all_text = context.get("all_text", change.get("content", ""))
+            content = change.get("content", "").strip()
+            if not content:
+                continue
 
-            converted_change = {
-                "change_id": change.get("change_id"),
-                "Section_Name": f"{change.get('type')} Change",  # Use change type as section name
-                "Policy_Content": change.get("content", ""),  # Use colored cell text as content
-                "Context": context.get("before", ""),  # Use before context
-                "Change_Type": change.get("type"),  # NEW, MODIFIED, or DELETED
-                "source": change.get("source", {}),  # Keep source info
-                "original_data": change,  # Keep original for reference
-            }
-            converted_changes.append(converted_change)
-
-        logger.info(f"Converted {len(converted_changes)} changes for detection")
-        detection_result = change_detector.detect_changes(
-            converted_changes, config.master_docx
-        )
-
-        detected_changes = detection_result.get("detected_changes", [])
-
-        # Enhance changes with intelligent mapping information
-        docx_handler = DocxHandler()
-        master_structure = docx_handler.extract_structure(config.master_docx)
-
-        enhanced_changes = []
-        for change in detected_changes:
-            # Get intelligent mapping for this change
-            mapping_result = change_mapper.map_change_to_section(
-                change.get("original_data", {}),
-                master_structure
-            )
-
-            # Add mapping info to change
-            change["mapping"] = mapping_result
-            change["mapping_confidence"] = mapping_result.get("confidence", 0)
-            change["suggested_section"] = mapping_result.get("section_title", "Unknown")
-
-            enhanced_changes.append(change)
-
-        detected_changes = enhanced_changes
-
-        # Save changes to JSON files
-        for change in detected_changes:
             change_id = change.get("change_id")
-            file_storage.save_json(
-                f"changes/{change_id}.json", change
-            )
-            logger.info(f"Saved change {change_id}")
+            change_type = change.get("type", "CHANGE")
 
-        # Log upload
-        file_storage.append_to_log(
-            "metadata/upload_log.json",
-            {
-                "filename": file.filename,
-                "size": len(contents),
-                "total_changes": len(detected_changes),
-            },
-        )
+            # Map to master section
+            mapping = {}
+            if master_structure and master_structure.get("sections"):
+                mapping = change_mapper.map_change_to_section(
+                    {"Policy_Content": content, "Context": context.get("before", ""), "Change_Type": change_type},
+                    master_structure,
+                )
 
-        logger.info(
-            f"Successfully processed {file.filename}: {len(detected_changes)} changes"
-        )
+            record = {
+                "change_id": change_id,
+                "Change_Type": change_type,
+                "Policy_Content": content,
+                "Context": context.get("before", ""),
+                "source": change.get("source", {}),
+                "mapping": mapping,
+                "match_details": {"start_para_idx": mapping.get("para_index", 0)},
+                "status": "PENDING",
+                "detected_at": datetime.now().isoformat(),
+            }
+
+            file_storage.save_json(f"changes/{change_id}.json", record)
+            saved_changes.append(record)
+
+        file_storage.append_to_log("metadata/upload_log.json", {
+            "filename": file.filename, "size": len(contents),
+            "total_changes": len(saved_changes),
+        })
+
+        logger.info(f"Processed {file.filename}: {len(saved_changes)} changes saved")
 
         return {
             "status": "success",
             "file_uploaded": file.filename,
-            "total_changes": len(detected_changes),
-            "changes": detected_changes,
-            "excel_summary": parse_result.get("summary", {}),
+            "total_changes": len(saved_changes),
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in upload_excel: {e}")
+        logger.error(f"Error in upload_excel: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -347,6 +322,7 @@ async def upload_technical_document(file: UploadFile = File(...)) -> Dict[str, A
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/upload-master")
 async def upload_master(file: UploadFile = File(...)) -> Dict[str, Any]:
     """
     Upload and replace master DOCX file.
@@ -407,12 +383,15 @@ async def upload_master(file: UploadFile = File(...)) -> Dict[str, Any]:
 
         logger.info(f"Master document saved to {master_path} ({len(contents)} bytes)")
 
-        # Extract and validate document structure
+        # Rebuild master structure cache immediately so it's ready for change detection
+        _invalidate_master_cache()
         try:
-            docx_handler.extract_structure(str(master_path))
-            logger.info(f"Validated master document structure")
+            structure = _get_master_structure()
+            sections = len(structure.get("sections", [])) if structure else 0
+            paras = len(structure.get("paragraphs", [])) if structure else 0
+            logger.info(f"Master structure indexed: {sections} sections, {paras} paragraphs")
         except Exception as e:
-            logger.warning(f"Could not fully validate document: {e}")
+            logger.warning(f"Could not index master document: {e}")
 
         # Log upload
         file_storage.append_to_log(
@@ -427,19 +406,22 @@ async def upload_master(file: UploadFile = File(...)) -> Dict[str, Any]:
 
         logger.info(f"Master document uploaded: {file.filename} ({len(contents)} bytes)")
 
+        structure = _master_structure_cache or {}
         return {
             "status": "success",
             "filename": file.filename,
             "size": len(contents),
-            "message": "Master document updated successfully",
+            "message": "Master document uploaded and indexed",
             "saved_to": str(master_path),
             "backup_path": str(backup_path) if backup_path else None,
+            "sections_indexed": len(structure.get("sections", [])),
+            "paragraphs_indexed": len(structure.get("paragraphs", [])),
         }
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error in upload_master: {e}")
+        logger.error(f"Error in upload_master: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
