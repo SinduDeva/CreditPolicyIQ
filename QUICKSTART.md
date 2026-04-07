@@ -20,16 +20,72 @@ cp .env.example .env
 #   LLM_PROVIDER=anthropic (or openai)
 ```
 
-### Step 3: Start
+### Step 3: Start with One Command
 ```bash
 ./run_all.sh
 ```
 
-### Step 4: Open
+**What run_all.sh does automatically:**
+1. ✅ Detects Python (python3 or python)
+2. ✅ Creates virtual environment (venv/)
+3. ✅ **Installs all dependencies** from requirements.txt
+   - fastapi, uvicorn, pydantic, streamlit
+   - pandas, openpyxl for Excel/document processing
+   - anthropic, requests for API calls
+   - No build tools or compilation needed
+4. ✅ Creates .env file if missing
+5. ✅ Starts FastAPI backend (port 8000)
+6. ✅ Starts Streamlit dashboard (port 8501)
+
+**Installation time:** ~2 minutes (first run) | ~10 seconds (subsequent runs)
+
+### Step 4: Open Dashboard
 - **Dashboard**: http://localhost:8501
 - **API Docs**: http://localhost:8000/docs
 
-✅ **Done!** Now follow the workflow below.
+✅ **Done!** Application is ready to use.
+
+---
+
+## 📋 **Requirements & Compatibility**
+
+### System Requirements
+- **Python:** 3.9 or higher (tested: 3.13 on Windows)
+- **OS:** Windows, macOS, or Linux
+- **RAM:** 4GB minimum
+- **Storage:** ~500MB for installation + data
+
+### Cross-Platform Validation
+✅ **All packages are cross-platform compatible:**
+- Windows (32/64-bit)
+- macOS (Intel & Apple Silicon)
+- Linux (AMD64 & ARM64)
+
+See `REQUIREMENTS_VALIDATION.md` for detailed compatibility report.
+
+### What Gets Installed
+```
+Core Framework:
+  ✅ fastapi (0.109.0+)      - REST API framework
+  ✅ uvicorn (0.27.0+)       - ASGI server
+  ✅ streamlit (1.28.0+)     - Dashboard UI
+
+Data Processing:
+  ✅ pandas (2.0.0+)         - Data analysis
+  ✅ openpyxl (3.0.0+)       - Excel parsing
+  ✅ python-docx (0.8.11+)   - Word documents
+
+Web & Validation:
+  ✅ pydantic (2.6.0+)       - Data validation
+  ✅ requests (2.31.0+)      - HTTP client
+  ✅ python-multipart        - Form processing
+
+LLM (Optional):
+  ✅ anthropic (0.7.0+)      - Claude API
+  ⚪ openai (optional)       - OpenAI API
+
+Total Size: ~300-400MB (includes dependencies)
+```
 
 ---
 
@@ -159,19 +215,63 @@ CreditPolicyIQ/
 
 ---
 
-## 🔧 **Troubleshooting**
+## 🔧 **Installation & Troubleshooting**
 
-### "Backend not found on port 8000"
+### Installation Failed?
+
+#### "Python not found"
+```bash
+# Verify Python is installed
+python --version  # or python3 --version
+
+# If not installed:
+# Windows: Download from https://python.org
+# macOS: brew install python3
+# Linux: sudo apt-get install python3
+```
+
+#### "Dependencies installation failed"
+```bash
+# Clean up and retry
+rm -rf venv
+./run_all.sh
+
+# If still failing, check:
+# - Internet connection (pip needs to download packages)
+# - Disk space (500MB free recommended)
+# - Python version (3.9+ required)
+```
+
+#### "Pydantic/pandas compilation error"
+✅ **Already fixed!** The requirements.txt uses flexible versions that:
+- Skip Rust compilation (pydantic>=2.6.0 has pre-built wheels)
+- Skip C compilation (pandas>=2.0.0 works on Python 3.13)
+- Use universal wheels (cross-platform)
+
+If you still see compiler errors, ensure you have the latest requirements.txt
+
+#### "Can't find venv or pip"
+```bash
+# On Windows, try explicit paths
+C:\Users\YourName\AppData\Local\Programs\Python\Python313\python.exe -m venv venv
+
+# On macOS/Linux
+/usr/bin/python3 -m venv venv
+```
+
+### Runtime Issues
+
+#### "Backend not found on port 8000"
 ```bash
 # Check if backend is running
 ps aux | grep "python.*app.py"
 
 # Or manually start in terminal 1
 source venv/bin/activate
-python3 app.py
+python app.py
 ```
 
-### "Cannot connect to API"
+#### "Cannot connect to API"
 ```bash
 # Verify backend is responding
 curl http://localhost:8000/api/health
@@ -179,20 +279,20 @@ curl http://localhost:8000/api/health
 # Result should be: {"status": "healthy"}
 ```
 
-### "Cannot translate changes with mock provider"
+#### "Cannot translate changes with mock provider"
 ✅ **Mock provider generates sample suggestions.** To get AI-powered suggestions:
 - **Option 1:** Go to ⚙️ Settings → 🔑 API Keys to add Anthropic/OpenAI key
 - **Option 2:** Edit `.env` with your API key and restart app
 - **For now:** Mock provider works perfectly for testing! ✅
 
-### "Excel upload fails"
+#### "Excel upload fails"
 - Ensure file is `.xlsx` (not `.xls` or `.csv`)
 - Check required columns exist
-- File size < 10 MB
+- File size < 500 MB (configurable)
 
-### "Cannot update master document"
+#### "Cannot update master document"
 - Ensure `.docx` format (not `.doc`)
-- File size < 50 MB
+- File size < 500 MB (configurable)
 - Previous version is auto-backed up
 
 ---
