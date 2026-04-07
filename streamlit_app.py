@@ -417,49 +417,102 @@ def page_master_document():
     """Manage master document and apply approved changes."""
     st.title("📄 Master Document")
 
-    col1, col2 = st.columns(2)
+    # Tabs for different operations
+    tab1, tab2, tab3 = st.tabs(["📤 Upload Master", "📥 Download & Info", "🚀 Apply Changes"])
 
-    with col1:
-        st.write("**Current Master Document:**")
-        st.info("master_policy_current.docx")
+    with tab1:
+        st.subheader("Upload Master Credit Policy Document")
+        st.write("Replace the current master policy document with a new version.")
 
-        if st.button("📥 Download Current", type="primary"):
-            with st.spinner("Downloading document..."):
-                success, data = api_call("GET", "/master/current")
+        uploaded_file = st.file_uploader("Choose master document", type=["docx"])
 
-            if success:
-                st.success("✅ Download ready!")
-                # Note: In real implementation, would need to handle binary response
-                st.write("(Download available via API)")
-            else:
-                st.error(f"Download failed: {data}")
+        if uploaded_file:
+            st.info(f"Selected: {uploaded_file.name} ({uploaded_file.size} bytes)")
 
-    with col2:
-        st.write("**Apply Approved Changes:**")
-
-        if st.button("🚀 Apply All Approved Changes", type="primary"):
-            if st.checkbox("I confirm to apply all approved changes to the master document"):
-                with st.spinner("Applying changes..."):
-                    success, result = api_call("POST", "/master/apply-changes")
-
-                if success:
-                    st.success("✅ Changes applied successfully!")
-
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric(
-                            "Version Created",
-                            result.get("version_created", "N/A").split("/")[-1] if result.get("version_created") else "N/A",
+            if st.button("📤 Upload Master Document", type="primary"):
+                if st.checkbox("I confirm this will replace the current master document (backed up automatically)"):
+                    with st.spinner("Uploading master document..."):
+                        success, result = api_call(
+                            "POST",
+                            "/upload-master",
+                            files={"file": (uploaded_file.name, uploaded_file, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")},
                         )
 
-                    with col2:
-                        st.metric("Changes Applied", result.get("changes_applied", 0))
+                    if success:
+                        st.success("✅ Master document uploaded successfully!")
+                        st.write(f"**File:** {result.get('filename')}")
+                        st.write(f"**Size:** {result.get('size', 0) / 1024:.1f} KB")
 
-                    st.info(
-                        f"Total approved changes: {result.get('total_approved', 0)}"
-                    )
-                else:
-                    st.error(f"Failed to apply changes: {result}")
+                        if result.get('backup_path'):
+                            st.info(f"Previous version backed up to: {result['backup_path']}")
+
+                        st.rerun()
+                    else:
+                        st.error(f"Upload failed: {result}")
+
+    with tab2:
+        st.subheader("Current Master Document")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.metric("Status", "Ready")
+            if st.button("📥 Download Current", type="primary", key="download_master"):
+                with st.spinner("Preparing download..."):
+                    st.info("Download feature: Use API endpoint /api/master/current")
+                    st.code("curl http://localhost:8000/api/master/current > master.docx")
+
+        with col2:
+            st.metric("Location", "data/master_policy.docx")
+            st.write("**Info:**")
+            st.write("• Main policy document")
+            st.write("• Auto-backed up on update")
+            st.write("• Versioned after changes")
+
+    with tab3:
+        st.subheader("Apply Approved Changes")
+        st.write("Apply all approved changes to the master document.")
+
+        # Show pending approved changes
+        with st.spinner("Loading approved changes..."):
+            success, data = api_call("GET", "/changes/pending")
+
+        if success:
+            pending_changes = data.get("changes", [])
+            approved = [c for c in pending_changes if c.get("status") == "APPROVED"]
+
+            st.metric("Approved Changes Ready", len(approved))
+
+            if approved:
+                st.write("**Changes to be applied:**")
+                for change in approved:
+                    st.write(f"  • {change.get('original_data', {}).get('Section_Name', 'Unknown')}")
+
+                if st.button("🚀 Apply All Approved Changes", type="primary"):
+                    if st.checkbox("I confirm to apply all approved changes to the master document"):
+                        with st.spinner("Applying changes..."):
+                            success, result = api_call("POST", "/master/apply-changes")
+
+                        if success:
+                            st.success("✅ Changes applied successfully!")
+
+                            col1, col2 = st.columns(2)
+                            with col1:
+                                st.metric(
+                                    "Version Created",
+                                    result.get("version_created", "N/A").split("/")[-1] if result.get("version_created") else "N/A",
+                                )
+
+                            with col2:
+                                st.metric("Changes Applied", result.get("changes_applied", 0))
+
+                            st.info(
+                                f"Total approved changes: {result.get('total_approved', 0)}"
+                            )
+                        else:
+                            st.error(f"Failed to apply changes: {result}")
+            else:
+                st.info("No approved changes waiting to be applied.")
 
 
 # ============================================================================

@@ -164,8 +164,89 @@ async def upload_excel(file: UploadFile = File(...)) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/master/current")
-async def get_master_current() -> FileResponse:
+@app.post("/api/upload-master")
+async def upload_master(file: UploadFile = File(...)) -> Dict[str, Any]:
+    """
+    Upload and replace master DOCX file.
+
+    Args:
+        file: Master document file (.docx)
+
+    Returns:
+        Upload status with document info
+    """
+    try:
+        # Validate file type
+        if not file.filename.endswith(".docx"):
+            logger.warning(f"Invalid file type uploaded: {file.filename}")
+            raise HTTPException(
+                status_code=400, detail="File must be .docx format"
+            )
+
+        # Read file contents
+        contents = await file.read()
+
+        # Validate file size (max 50MB for documents)
+        max_size = 50 * 1024 * 1024
+        if len(contents) > max_size:
+            logger.warning(
+                f"File too large: {file.filename} ({len(contents)} bytes)"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"File size exceeds {max_size / 1024 / 1024}MB limit",
+            )
+
+        # Backup existing master document if it exists
+        master_path = Path(config.master_docx)
+        if master_path.exists():
+            backup_dir = Path("data/backups")
+            backup_dir.mkdir(parents=True, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = backup_dir / f"master_policy_backup_{timestamp}.docx"
+
+            import shutil
+            shutil.copy2(master_path, backup_path)
+            logger.info(f"Backed up existing master to {backup_path}")
+
+        # Save new master document
+        master_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(master_path, "wb") as f:
+            f.write(contents)
+
+        # Extract and validate document structure
+        try:
+            docx_handler.extract_structure(str(master_path))
+            logger.info(f"Validated master document structure")
+        except Exception as e:
+            logger.warning(f"Could not fully validate document: {e}")
+
+        # Log upload
+        file_storage.append_to_log(
+            "metadata/master_upload_log.json",
+            {
+                "filename": file.filename,
+                "size": len(contents),
+                "action": "master_document_uploaded",
+            },
+        )
+
+        logger.info(f"Master document uploaded: {file.filename} ({len(contents)} bytes)")
+
+        return {
+            "status": "success",
+            "filename": file.filename,
+            "size": len(contents),
+            "message": "Master document updated successfully",
+            "backup_path": str(backup_path) if master_path.exists() else None,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in upload_master: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
     """
     Download current master DOCX file.
 
