@@ -108,10 +108,21 @@ Total Size: ~300-400MB (includes dependencies)
   - 🔴 RED = DELETED
 - Upload
 
-**Excel columns needed:**
+**Excel columns:**
 ```
-Section_ID | Section_Name | Policy_Content | 
-UW_Technical_Details | Status | Color_Flag | Notes
+REQUIRED (minimum):
+- Section_Name .......................... Name of the policy section
+- Policy_Content ........................ The policy text/content
+
+OPTIONAL (for enhanced features):
+- Section_ID ............................ Unique identifier (auto-generated if missing)
+- UW_Technical_Details .................. Technical underwriting notes
+- Status ............................... Change status (defaults to PENDING)
+- Color_Flag ............................ Cell background color for change type
+  * GREEN (#00B050) = NEW
+  * YELLOW (#FFFF00) = MODIFIED
+  * RED (#FF0000) = DELETED
+- Notes ................................ Additional notes
 ```
 
 **API:** `POST /api/upload-excel`

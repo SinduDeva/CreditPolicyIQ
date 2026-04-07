@@ -4,11 +4,16 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-# Required columns for Excel parsing
+# Minimal required columns for Excel parsing
+# Only Section_Name and Policy_Content are mandatory
 REQUIRED_EXCEL_COLUMNS = [
-    "Section_ID",
     "Section_Name",
     "Policy_Content",
+]
+
+# Optional columns that enhance functionality
+OPTIONAL_EXCEL_COLUMNS = [
+    "Section_ID",
     "UW_Technical_Details",
     "Status",
     "Color_Flag",
