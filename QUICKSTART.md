@@ -11,12 +11,13 @@
 cd /home/user/CreditPolicyIQ
 ```
 
-### Step 2: Configure
+### Step 2: Configure (Optional)
 ```bash
 cp .env.example .env
-# Edit .env and add:
-# LLM_API_KEY=your-key-from-anthropic.com (optional)
-# LLM_PROVIDER=anthropic (or openai, or mock for testing)
+# ✅ App works with default settings (mock provider, no API key needed)
+# Optional: Add your LLM API key to enable AI features
+#   LLM_API_KEY=your-api-key-here
+#   LLM_PROVIDER=anthropic (or openai)
 ```
 
 ### Step 3: Start
@@ -95,32 +96,31 @@ UW_Technical_Details | Status | Color_Flag | Notes
 
 ## 📋 **Configuration**
 
-### Environment Variables (in .env)
+### Default Settings ✅
+**Out of the box, the app works with no setup needed:**
+- **LLM Provider:** mock (no API key required)
+- **Dashboard:** http://localhost:8501
+- **API:** http://localhost:8000
+
+### Optional: Enable AI Features
+To use Anthropic Claude or OpenAI models, update `.env`:
 
 ```bash
-# === LLM PROVIDER ===
-LLM_PROVIDER=anthropic          # anthropic, openai, or mock
-LLM_API_KEY=sk-ant-xxx...       # Optional (use mock if not set)
-LLM_MODEL=claude-3-5-sonnet...  # Auto-defaults if not set
-
-# === FILE PATHS ===
-MASTER_DOCX_PATH=data/master_policy.docx
-EXCEL_PATH=data/policy_changes.xlsx
-
-# === LOGGING ===
-LOG_LEVEL=INFO
-LOG_FILE=logs/app.log
+# === LLM PROVIDER (Optional) ===
+LLM_PROVIDER=anthropic          # anthropic, openai, or mock (default)
+LLM_API_KEY=sk-ant-xxx...       # Your API key here
+LLM_MODEL=claude-3-5-sonnet-20241022  # Auto-selects if not set
 ```
 
 ### LLM Provider Options
 
-| Provider | Cost | API Key | Quality | Notes |
-|----------|------|---------|---------|-------|
-| **anthropic** | Low | Required | Best | Recommended |
-| **openai** | Higher | Required | Good | Alternative |
-| **mock** | FREE | Not needed | Basic | Testing only |
+| Provider | Cost | API Key | Quality | Default |
+|----------|------|---------|---------|---------|
+| **mock** | FREE | ❌ No | Basic | ✅ Yes |
+| **anthropic** | Low | ✅ Yes | Best | Optional |
+| **openai** | Higher | ✅ Yes | Good | Optional |
 
-**No API key?** Use `LLM_PROVIDER=mock` - app works fully without it! ✅
+**Works without any API key!** Default mock provider is perfect for testing. ✅
 
 ---
 
@@ -179,13 +179,11 @@ curl http://localhost:8000/api/health
 # Result should be: {"status": "healthy"}
 ```
 
-### "API key not configured"
-✅ **This is OK!** Use mock provider:
-```bash
-# In .env:
-LLM_PROVIDER=mock
-# No LLM_API_KEY needed - app works fully without it
-```
+### "Cannot translate changes with mock provider"
+✅ **Mock provider generates sample suggestions.** To get AI-powered suggestions:
+- **Option 1:** Go to ⚙️ Settings → 🔑 API Keys to add Anthropic/OpenAI key
+- **Option 2:** Edit `.env` with your API key and restart app
+- **For now:** Mock provider works perfectly for testing! ✅
 
 ### "Excel upload fails"
 - Ensure file is `.xlsx` (not `.xls` or `.csv`)
@@ -270,36 +268,40 @@ Visit: http://localhost:8000/docs
 
 ---
 
-## 🚀 **For LLM Features** (Optional)
+## 🚀 **LLM Configuration** (All Optional)
 
-### Setup Anthropic (Recommended)
-1. Visit https://console.anthropic.com
-2. Create API key
-3. Add to `.env`:
+### 1️⃣ Current Status
+- **Default Provider:** mock (no API key needed)
+- **AI Features:** Available with mock suggestions
+- **No Cost:** Use as-is with no additional setup
+
+### 2️⃣ Upgrade to Anthropic Claude (Recommended)
+1. Visit https://console.anthropic.com/keys
+2. Create new API key
+3. Edit `.env` and update:
    ```
    LLM_PROVIDER=anthropic
    LLM_API_KEY=sk-ant-xxx...
    ```
-4. Restart app
-5. Dashboard now has AI-powered suggestions ✨
+4. Restart application
+5. Dashboard now uses Claude for better suggestions ✨
 
-### Or Use OpenAI
-1. Install: `pip install openai`
-2. Visit https://platform.openai.com/account/api-keys
-3. Create API key
-4. Add to `.env`:
+### 3️⃣ Or Use OpenAI GPT
+1. Visit https://platform.openai.com/api-keys
+2. Create API key
+3. Edit `.env`:
    ```
    LLM_PROVIDER=openai
    LLM_API_KEY=sk-xxx...
    LLM_MODEL=gpt-4-turbo
    ```
-5. Restart app
+4. Restart application
 
-### Or Stay Free (Mock Provider)
-- No setup needed
-- Use `LLM_PROVIDER=mock`
-- Works 100% without API key
-- Good for testing
+### 4️⃣ Manage API Keys in Dashboard
+- Go to **⚙️ Settings** → **🔑 API Keys**
+- View current provider and API key status
+- Get instructions for updating keys
+- No restart needed from settings page (manual .env edit required)
 
 ---
 

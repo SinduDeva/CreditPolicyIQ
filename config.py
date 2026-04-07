@@ -29,8 +29,8 @@ class Config:
         self.excel_path = self.config_data.get("excel_path", "data/policy_changes.xlsx")
         self.max_tokens = self.config_data.get("max_tokens", 1000)
 
-        # LLM Provider configuration
-        self.llm_provider = os.getenv("LLM_PROVIDER", self.config_data.get("llm_provider", "anthropic"))
+        # LLM Provider configuration (defaults to mock for API-free operation)
+        self.llm_provider = os.getenv("LLM_PROVIDER", self.config_data.get("llm_provider", "mock"))
         self.model = os.getenv(
             "LLM_MODEL",
             self.config_data.get("model", self._get_default_model(self.llm_provider)),

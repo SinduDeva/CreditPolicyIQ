@@ -680,6 +680,145 @@ def page_logs():
 
 
 # ============================================================================
+# SETTINGS PAGE
+# ============================================================================
+
+
+def page_settings():
+    """Settings and configuration management."""
+    st.title("⚙️ Settings")
+
+    st.markdown("Configure your application preferences and LLM settings.")
+
+    tab1, tab2, tab3 = st.tabs(["🔑 API Keys", "🤖 LLM Provider", "📁 File Limits"])
+
+    # Tab 1: API Key Management
+    with tab1:
+        st.subheader("API Key Configuration")
+        st.write("Securely manage your API keys for LLM providers.")
+
+        from config import config
+
+        current_provider = config.llm_provider
+        has_api_key = bool(config.api_key)
+
+        st.write(f"**Current Provider:** {current_provider.capitalize()}")
+        if has_api_key:
+            st.success("✅ API Key is configured")
+        else:
+            st.warning("⚠️ API Key is not configured (using mock provider)")
+
+        st.divider()
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.write("**Update API Key:**")
+            provider = st.selectbox(
+                "Select provider",
+                ["anthropic", "openai", "mock"],
+                index=["anthropic", "openai", "mock"].index(current_provider) if current_provider in ["anthropic", "openai", "mock"] else 0,
+            )
+
+            api_key = st.text_input(
+                "API Key",
+                type="password",
+                placeholder="Enter your API key here",
+                help="Your API key is stored securely in .env file",
+            )
+
+            if api_key:
+                st.info("💾 To save this API key, manually update your .env file:")
+                st.code(f"LLM_PROVIDER={provider}\nLLM_API_KEY={api_key}")
+                st.caption("After updating .env, restart the application for changes to take effect")
+
+        with col2:
+            st.write("**Provider Information:**")
+            if provider == "anthropic":
+                st.markdown("""
+                **Anthropic Claude**
+                - Best quality responses
+                - Recommended for production
+                - Get key: https://console.anthropic.com
+                """)
+            elif provider == "openai":
+                st.markdown("""
+                **OpenAI GPT**
+                - Widely available
+                - Good quality responses
+                - Get key: https://platform.openai.com/account/api-keys
+                """)
+            else:
+                st.markdown("""
+                **Mock Provider**
+                - No API key needed
+                - Perfect for testing
+                - Generates sample responses
+                """)
+
+    # Tab 2: LLM Provider Settings
+    with tab2:
+        st.subheader("LLM Provider Configuration")
+        st.write("Configure which LLM provider to use and model selection.")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.info(f"**Active Provider:** {config.llm_provider.capitalize()}")
+            st.write(f"**Model:** {config.model}")
+            st.write(f"**Max Tokens:** {config.max_tokens}")
+
+        with col2:
+            st.markdown("""
+            **Switching Providers:**
+            1. Edit your `.env` file
+            2. Change `LLM_PROVIDER` to desired provider
+            3. Add corresponding `LLM_API_KEY` if needed
+            4. Restart the application
+
+            **Provider Models:**
+            - Anthropic: claude-3-5-sonnet-20241022, claude-3-opus-20240229
+            - OpenAI: gpt-4-turbo, gpt-4, gpt-3.5-turbo
+            - Mock: No configuration needed
+            """)
+
+        st.divider()
+        st.caption("📖 See LLM_PROVIDERS.md in docs for detailed configuration options")
+
+    # Tab 3: File Upload Settings
+    with tab3:
+        st.subheader("File Upload Configuration")
+        st.write("Configure file size limits and allowed file types.")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.write("**Current Settings:**")
+            st.info("""
+            📊 **Max Upload Size:** Check your .env file
+            📁 **Allowed Types:** .xlsx, .docx
+            """)
+
+        with col2:
+            st.write("**Recommended Limits:**")
+            st.markdown("""
+            | Type | Recommended | Max |
+            |------|-------------|-----|
+            | Excel Files | ≤ 50 MB | 100 MB |
+            | Word Docs | ≤ 100 MB | 500 MB |
+            | Total | ≤ 150 MB | 1 GB |
+
+            To increase limits, edit your `.env`:
+            ```
+            MAX_UPLOAD_SIZE=524288000  # 500 MB
+            ```
+            """)
+
+    st.divider()
+    st.caption("💡 Tip: Configuration changes require application restart to take effect")
+
+
+# ============================================================================
 # SIDEBAR CONFIGURATION
 # ============================================================================
 
@@ -741,6 +880,7 @@ def main():
         "📄 Master Document": page_master_document,
         "📚 Version History": page_version_history,
         "📋 Logs": page_logs,
+        "⚙️ Settings": page_settings,
     }
 
     selected_page = st.sidebar.radio("Navigation", list(pages.keys()))
