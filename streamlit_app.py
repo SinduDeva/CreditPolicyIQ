@@ -182,21 +182,28 @@ def api_call(
         else:
             return False, "Unsupported HTTP method"
 
+        # Always try to parse JSON first
+        try:
+            response_data = response.json()
+        except:
+            response_data = response.text
+
         if response.status_code == 200:
-            try:
-                return True, response.json()
-            except ValueError:
-                return True, response.content
+            return True, response_data
         else:
-            error_msg = response.text or f"HTTP {response.status_code}"
+            # Return error details
+            if isinstance(response_data, dict):
+                error_msg = response_data.get("detail", str(response_data))
+            else:
+                error_msg = str(response_data) if response_data else f"HTTP {response.status_code}"
             return False, error_msg
 
     except requests.exceptions.ConnectionError:
-        return False, "Cannot connect to API server"
+        return False, "Cannot connect to API server - make sure FastAPI is running"
     except requests.exceptions.Timeout:
-        return False, f"Request timeout"
+        return False, f"Request timeout after {REQUEST_TIMEOUT}s"
     except Exception as e:
-        return False, str(e)
+        return False, f"Error: {str(e)}"
 
 
 def check_master_exists() -> bool:
@@ -278,21 +285,30 @@ with col_master:
         with col_upload:
             if st.button("⬆️ Upload Master", use_container_width=True, key="upload_master"):
                 with st.spinner("Uploading..."):
-                    file_bytes = master_file.getvalue()
-                    files = {"file": ("master_policy.docx", file_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
-                    success, response = api_call("POST", "/upload-master", files=files)
+                    try:
+                        file_bytes = master_file.getvalue()
+                        files = {"file": ("master_policy.docx", file_bytes, "application/vnd.openxmlformats-officedocument.wordprocessingml.document")}
+                        success, response = api_call("POST", "/upload-master", files=files)
 
-                    if success:
-                        st.markdown("""
-                        <div class="status-box status-success">
-                            ✅ Master document uploaded!
-                        </div>
-                        """, unsafe_allow_html=True)
-                        st.rerun()
-                    else:
+                        if success:
+                            st.markdown("""
+                            <div class="status-box status-success">
+                                ✅ Master document uploaded successfully!
+                            </div>
+                            """, unsafe_allow_html=True)
+                            st.rerun()
+                        else:
+                            error_detail = response if isinstance(response, str) else str(response)
+                            st.markdown(f"""
+                            <div class="status-box status-error">
+                                ❌ Upload failed<br>
+                                <small>{error_detail}</small>
+                            </div>
+                            """, unsafe_allow_html=True)
+                    except Exception as e:
                         st.markdown(f"""
                         <div class="status-box status-error">
-                            ❌ Upload failed
+                            ❌ Error: {str(e)}
                         </div>
                         """, unsafe_allow_html=True)
         with col_info:
@@ -345,23 +361,32 @@ with col_tech:
             with col_upload:
                 if st.button("🔍 Detect Changes", use_container_width=True, key="detect_btn"):
                     with st.spinner("Analyzing..."):
-                        file_bytes = tech_file.getvalue()
-                        files = {"file": (tech_file.name, file_bytes, content_type)}
-                        success, response = api_call("POST", endpoint, files=files)
+                        try:
+                            file_bytes = tech_file.getvalue()
+                            files = {"file": (tech_file.name, file_bytes, content_type)}
+                            success, response = api_call("POST", endpoint, files=files)
 
-                        if success:
-                            total = response.get("total_changes", 0)
-                            st.markdown(f"""
-                            <div class="status-box status-success">
-                                ✅ Detection complete<br>
-                                Found <b>{total} changes</b>
-                            </div>
-                            """, unsafe_allow_html=True)
-                            st.rerun()
-                        else:
+                            if success:
+                                total = response.get("total_changes", 0) if isinstance(response, dict) else 0
+                                st.markdown(f"""
+                                <div class="status-box status-success">
+                                    ✅ Detection complete<br>
+                                    Found <b>{total} changes</b>
+                                </div>
+                                """, unsafe_allow_html=True)
+                                st.rerun()
+                            else:
+                                error_detail = response if isinstance(response, str) else str(response)
+                                st.markdown(f"""
+                                <div class="status-box status-error">
+                                    ❌ Detection failed<br>
+                                    <small>{error_detail}</small>
+                                </div>
+                                """, unsafe_allow_html=True)
+                        except Exception as e:
                             st.markdown(f"""
                             <div class="status-box status-error">
-                                ❌ Detection failed
+                                ❌ Error: {str(e)}
                             </div>
                             """, unsafe_allow_html=True)
             with col_info:
