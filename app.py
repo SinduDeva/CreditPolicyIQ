@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import config
 from utils.logger import setup_logger
 from utils.file_storage import file_storage
+from core.intelligent_excel_parser import IntelligentExcelParser
 from core.excel_parser import ExcelParser
 from core.change_detector import ChangeDetector
 from core.docx_handler import DocxHandler
@@ -38,7 +39,8 @@ app.add_middleware(
 )
 
 # Initialize core modules
-excel_parser = ExcelParser()
+# Use intelligent parser that works with any Excel structure
+excel_parser = IntelligentExcelParser()
 change_detector = ChangeDetector()
 docx_handler = DocxHandler()
 approval_workflow = ApprovalWorkflow()
@@ -119,10 +121,29 @@ async def upload_excel(file: UploadFile = File(...)) -> Dict[str, Any]:
             logger.error(f"Error parsing Excel: {parse_result['error']}")
             raise HTTPException(status_code=400, detail=parse_result["error"])
 
-        # Detect changes
+        # Convert intelligent parser output to change_detector format
         parsed_changes = parse_result.get("parsed_changes", [])
+        converted_changes = []
+
+        for change in parsed_changes:
+            # Extract section name from context or use default
+            context = change.get("context", {})
+            all_text = context.get("all_text", change.get("content", ""))
+
+            converted_change = {
+                "change_id": change.get("change_id"),
+                "Section_Name": f"{change.get('type')} Change",  # Use change type as section name
+                "Policy_Content": change.get("content", ""),  # Use colored cell text as content
+                "Context": context.get("before", ""),  # Use before context
+                "Change_Type": change.get("type"),  # NEW, MODIFIED, or DELETED
+                "source": change.get("source", {}),  # Keep source info
+                "original_data": change,  # Keep original for reference
+            }
+            converted_changes.append(converted_change)
+
+        logger.info(f"Converted {len(converted_changes)} changes for detection")
         detection_result = change_detector.detect_changes(
-            parsed_changes, config.master_docx
+            converted_changes, config.master_docx
         )
 
         detected_changes = detection_result.get("detected_changes", [])
