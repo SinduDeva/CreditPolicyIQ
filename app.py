@@ -247,6 +247,9 @@ async def upload_master(file: UploadFile = File(...)) -> Dict[str, Any]:
         logger.error(f"Error in upload_master: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/api/master/current")
+async def get_master_current() -> FileResponse:
     """
     Download current master DOCX file.
 
