@@ -829,14 +829,11 @@ def sidebar_config():
 
     with st.sidebar.expander("Backend Configuration"):
         st.write(f"**API Base URL:** {API_BASE_URL}")
-        st.write(f"**Backend Status:** ", end="")
 
         # Quick health check
         success, _ = api_call("GET", "/health")
-        if success:
-            st.write("✅ Online")
-        else:
-            st.write("❌ Offline")
+        status_text = "✅ Online" if success else "❌ Offline"
+        st.write(f"**Backend Status:** {status_text}")
 
     with st.sidebar.expander("Storage"):
         st.write("**File Storage:** JSON files")
