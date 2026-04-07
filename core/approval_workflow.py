@@ -65,7 +65,7 @@ class ApprovalWorkflow:
             return []
 
     def approve_change(
-        self, change_id: str, approver: str, comment: str = ""
+        self, change_id: str, approver: str, comment: str = "", change_type: Optional[str] = None
     ) -> bool:
         """
         Approve a change and update its status.
@@ -74,6 +74,7 @@ class ApprovalWorkflow:
             change_id: ID of change to approve
             approver: Name/ID of approver
             comment: Approval comment
+            change_type: Optional change type to set (NEW, MODIFIED, DELETED, CHANGE)
 
         Returns:
             True if successful, False otherwise
@@ -94,6 +95,11 @@ class ApprovalWorkflow:
             change["approved_at"] = datetime.utcnow().isoformat()
             change["approval_comment"] = comment
 
+            # Update change type if provided (e.g., user selected from dropdown)
+            if change_type and change_type in ["NEW", "MODIFIED", "DELETED"]:
+                change["Change_Type"] = change_type
+                self.logger.info(f"Set change {change_id} type to {change_type}")
+
             # Save updated change
             with open(change_file, "w") as f:
                 json.dump(change, f, indent=2)
@@ -101,7 +107,7 @@ class ApprovalWorkflow:
             # Log approval
             self._log_approval(change_id, approver, "APPROVED", comment)
 
-            self.logger.info(f"Approved change {change_id} by {approver}")
+            self.logger.info(f"Approved change {change_id} by {approver} (type: {change.get('Change_Type')})")
             return True
 
         except Exception as e:
@@ -199,13 +205,23 @@ class ApprovalWorkflow:
                     # Extract document structure
                     docx_handler.extract_structure(config.master_docx)
 
-                    # Update paragraph
-                    new_text = change.get("suggested_narrative", "")
+                    change_type = change.get("Change_Type", "MODIFIED")
                     output_path = config.master_docx + ".updated"
+                    success = False
 
-                    if docx_handler.update_paragraph(
-                        para_index, new_text, output_path
-                    ):
+                    if change_type == "DELETED":
+                        # Delete the paragraph
+                        success = docx_handler.delete_paragraph(para_index, output_path)
+                        action_desc = "Delete"
+                    else:
+                        # Update paragraph for NEW or MODIFIED
+                        new_text = change.get("suggested_narrative", "")
+                        success = docx_handler.update_paragraph(
+                            para_index, new_text, output_path
+                        )
+                        action_desc = "Update"
+
+                    if success:
                         # Mark change as applied
                         change["status"] = STATUS_APPLIED
                         change["applied_at"] = datetime.utcnow().isoformat()
@@ -216,12 +232,14 @@ class ApprovalWorkflow:
                             json.dump(change, f, indent=2)
 
                         applied_count += 1
-                        self.logger.info(f"Applied change {change.get('change_id')}")
+                        self.logger.info(
+                            f"{action_desc} change {change.get('change_id')} (type: {change_type})"
+                        )
                     else:
                         errors.append(
                             {
                                 "change_id": change.get("change_id"),
-                                "error": "Failed to update paragraph",
+                                "error": f"Failed to {action_desc.lower()} paragraph",
                             }
                         )
 

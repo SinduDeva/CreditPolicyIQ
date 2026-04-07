@@ -45,13 +45,20 @@ class DocxHandler:
 
             # Iterate through paragraphs
             for para_idx, para in enumerate(doc.paragraphs):
+                # Get outline level safely - not all formats support it
+                level = 0
+                try:
+                    if hasattr(para.paragraph_format, 'outline_level'):
+                        ol = para.paragraph_format.outline_level
+                        level = ol if ol is not None else 0
+                except AttributeError:
+                    level = 0
+
                 para_data = {
                     "index": para_idx,
                     "text": para.text,
                     "style": para.style.name if para.style else "Normal",
-                    "level": para.paragraph_format.outline_level
-                    if para.paragraph_format.outline_level is not None
-                    else 0,
+                    "level": level,
                     "is_heading": self._is_heading(para),
                 }
 
@@ -225,6 +232,40 @@ class DocxHandler:
         except Exception as e:
             self.logger.error(f"Error adding paragraph: {e}")
             return None
+
+    def delete_paragraph(self, para_index: int, output_path: str) -> bool:
+        """
+        Delete a paragraph from the document.
+
+        Args:
+            para_index: Index of paragraph to delete
+            output_path: Path to save updated document
+
+        Returns:
+            True if successful, False otherwise
+        """
+        if not self._current_doc:
+            self.logger.error("No document loaded")
+            return False
+
+        try:
+            paragraphs = self._current_doc.paragraphs
+
+            if para_index < 0 or para_index >= len(paragraphs):
+                self.logger.error(f"Invalid paragraph index: {para_index}")
+                return False
+
+            para = paragraphs[para_index]
+            p = para._element
+            p.getparent().remove(p)
+
+            self._current_doc.save(output_path)
+            self.logger.info(f"Deleted paragraph {para_index} and saved to {output_path}")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Error deleting paragraph: {e}")
+            return False
 
     def _is_heading(self, paragraph) -> bool:
         """

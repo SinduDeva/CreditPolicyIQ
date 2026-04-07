@@ -305,6 +305,40 @@ async def upload_master(file: UploadFile = File(...)) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/api/master/current-status")
+async def get_master_status() -> Dict[str, Any]:
+    """
+    Get status of current master DOCX file.
+
+    Returns:
+        Status with exists flag, size, and modified time
+    """
+    try:
+        master_path = Path(config.master_docx)
+
+        if not master_path.exists():
+            return {
+                "exists": False,
+                "message": "No master document uploaded yet"
+            }
+
+        stat = master_path.stat()
+        return {
+            "exists": True,
+            "filename": master_path.name,
+            "size": stat.st_size,
+            "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+            "path": str(master_path),
+        }
+
+    except Exception as e:
+        logger.error(f"Error in get_master_status: {e}")
+        return {
+            "exists": False,
+            "error": str(e)
+        }
+
+
 @app.get("/api/master/current")
 async def get_master_current() -> FileResponse:
     """
@@ -552,14 +586,14 @@ async def edit_suggestion(
 
 @app.post("/api/changes/{change_id}/approve")
 async def approve_change(
-    change_id: str, body: Dict[str, str] = Body(...)
+    change_id: str, body: Dict[str, Any] = Body(...)
 ) -> Dict[str, Any]:
     """
     Approve a change.
 
     Args:
         change_id: ID of change to approve
-        body: JSON body with user and comment
+        body: JSON body with user, comment, and optional change_type
 
     Returns:
         Approval status
@@ -567,9 +601,10 @@ async def approve_change(
     try:
         user = body.get("user", "unknown")
         comment = body.get("comment", "")
+        change_type = body.get("change_type")  # Optional: if user selected a type
 
         # Approve change
-        success = approval_workflow.approve_change(change_id, user, comment)
+        success = approval_workflow.approve_change(change_id, user, comment, change_type)
 
         if not success:
             logger.warning(f"Failed to approve change {change_id}")
@@ -585,10 +620,11 @@ async def approve_change(
                 "approver": user,
                 "action": "APPROVED",
                 "comment": comment,
+                "change_type": change_type,
             },
         )
 
-        logger.info(f"Approved change {change_id} by {user}")
+        logger.info(f"Approved change {change_id} by {user} (type: {change_type})")
 
         return {
             "status": "success",
