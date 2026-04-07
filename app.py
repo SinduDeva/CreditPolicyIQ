@@ -208,7 +208,145 @@ async def upload_excel(file: UploadFile = File(...)) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/upload-master")
+@app.post("/api/upload-technical-document")
+async def upload_technical_document(file: UploadFile = File(...)) -> Dict[str, Any]:
+    """
+    Upload and parse Word document with policy changes.
+
+    Args:
+        file: Word document file (.docx)
+
+    Returns:
+        Upload status with parsed changes and summary
+    """
+    try:
+        # Validate file type
+        if not file.filename.endswith(".docx"):
+            logger.warning(f"Invalid file type uploaded: {file.filename}")
+            raise HTTPException(
+                status_code=400, detail="File must be .docx format"
+            )
+
+        # Save uploaded file
+        upload_dir = Path("data/uploads")
+        upload_dir.mkdir(parents=True, exist_ok=True)
+        file_path = upload_dir / file.filename
+
+        contents = await file.read()
+        # Validate file size (max 50MB)
+        max_size = 50 * 1024 * 1024
+        if len(contents) > max_size:
+            logger.warning(
+                f"File too large: {file.filename} ({len(contents)} bytes)"
+            )
+            raise HTTPException(
+                status_code=400,
+                detail=f"File size exceeds {max_size / 1024 / 1024}MB limit",
+            )
+
+        with open(file_path, "wb") as f:
+            f.write(contents)
+
+        logger.info(f"Technical document uploaded: {file.filename}")
+
+        # Extract text from Word document
+        docx_handler = DocxHandler()
+        extracted_structure = docx_handler.extract_structure(str(file_path))
+
+        if "error" in extracted_structure:
+            logger.error(f"Error extracting from document: {extracted_structure['error']}")
+            raise HTTPException(
+                status_code=400, detail="Could not extract content from document"
+            )
+
+        # Get all text from document
+        doc_text = extracted_structure.get("all_text", "")
+        paragraphs = extracted_structure.get("paragraphs", [])
+
+        # Create change entries for each paragraph (simplified change detection)
+        converted_changes = []
+        for idx, para in enumerate(paragraphs):
+            if para.get("text", "").strip():
+                change_id = f"doc_para_{idx}_{para.get('text', '')[:20]}"
+                converted_change = {
+                    "change_id": change_id,
+                    "Section_Name": f"Paragraph {idx}",
+                    "Policy_Content": para.get("text", ""),
+                    "Context": "",
+                    "Change_Type": "CHANGE",  # Will be determined during review
+                    "source": {
+                        "document": file.filename,
+                        "paragraph_index": idx,
+                    },
+                    "original_data": para,
+                }
+                converted_changes.append(converted_change)
+
+        logger.info(f"Extracted {len(converted_changes)} paragraphs from document")
+
+        detection_result = change_detector.detect_changes(
+            converted_changes, config.master_docx
+        )
+
+        detected_changes = detection_result.get("detected_changes", [])
+
+        # Enhance changes with intelligent mapping
+        master_structure = docx_handler.extract_structure(config.master_docx)
+        enhanced_changes = []
+
+        for change in detected_changes:
+            # Map to master document section
+            mapping = change_mapper.map_change(
+                change.get("Policy_Content", ""),
+                change.get("Context", ""),
+                master_structure,
+            )
+
+            change["mapping"] = mapping
+            change["match_details"] = {
+                "start_para_idx": mapping.get("para_index", 0),
+            }
+            enhanced_changes.append(change)
+
+        detected_changes = enhanced_changes
+
+        # Save changes to JSON files
+        for change in detected_changes:
+            change_id = change.get("change_id")
+            file_storage.save_json(
+                f"changes/{change_id}.json", change
+            )
+            logger.info(f"Saved change {change_id}")
+
+        # Log upload
+        file_storage.append_to_log(
+            "metadata/upload_log.json",
+            {
+                "filename": file.filename,
+                "size": len(contents),
+                "type": "technical_document",
+                "total_changes": len(detected_changes),
+            },
+        )
+
+        logger.info(
+            f"Successfully processed {file.filename}: {len(detected_changes)} changes"
+        )
+
+        return {
+            "status": "success",
+            "file_uploaded": file.filename,
+            "total_changes": len(detected_changes),
+            "changes": detected_changes,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in upload_technical_document: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 async def upload_master(file: UploadFile = File(...)) -> Dict[str, Any]:
     """
     Upload and replace master DOCX file.
