@@ -814,10 +814,28 @@ def page_unified_review():
                         color_indicator = "🟡"
                     elif change_type == "DELETED":
                         color_indicator = "🔴"
+                    elif change_type == "CHANGE":
+                        color_indicator = "🔵"
                     else:
                         color_indicator = "⚪"
 
-                    st.write(f"**{color_indicator} {change_type}** - {change_id}")
+                    # Display header
+                    col_header1, col_header2 = st.columns([2, 1])
+                    with col_header1:
+                        st.write(f"**{color_indicator} {change_type}** - {change_id}")
+
+                    # If type is CHANGE, let user select the actual type
+                    if change_type == "CHANGE":
+                        with col_header2:
+                            selected_type = st.selectbox(
+                                "Type",
+                                ["NEW", "MODIFIED", "DELETED"],
+                                key=f"type_selector_{idx}",
+                                label_visibility="collapsed"
+                            )
+                            if selected_type:
+                                change["Change_Type"] = selected_type
+                                change_type = selected_type
 
                     # Change content
                     content = change.get("Policy_Content", "")
@@ -836,7 +854,8 @@ def page_unified_review():
                         if st.button("✅ Accept", key=f"accept_{idx}", use_container_width=True):
                             success, _ = api_call("POST", f"/changes/{change_id}/approve", {
                                 "user": "reviewer",
-                                "comment": "Accepted from unified review"
+                                "comment": "Accepted from unified review",
+                                "change_type": change_type
                             })
                             if success:
                                 st.success("✅ Accepted!")

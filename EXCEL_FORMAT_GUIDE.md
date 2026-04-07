@@ -6,15 +6,17 @@
 
 ## 📋 **How It Works**
 
-The Excel parser scans **all sheets** in your workbook and identifies changes by **color highlighting**, not by specific columns or structure.
+The Excel parser scans **all sheets** in your workbook and identifies changes by **cell highlighting**, not by specific columns or structure.
 
-### Change Detection by Color
+### Change Detection by Highlighting
 
-| Color | Meaning | Action |
-|-------|---------|--------|
-| 🟢 **GREEN** | New Content | Add to master document |
-| 🟡 **YELLOW** | Modified Content | Update in master document |
-| 🔴 **RED** | Deleted Content | Remove from master document |
+| Highlighting | Meaning |
+|-----------|---------|
+| 🔘 **Any Color** | New or Modified Content (you choose during review) |
+| ⚫ **Grey** | Deleted Content (to be removed from master document) |
+| No Highlight | Not a change (ignored) |
+
+**Key Point:** You can use ANY color (blue, pink, purple, orange, etc.) to highlight changes - the tool doesn't care about the specific color. Only grey is special - it always means "delete this".
 
 ---
 
@@ -22,32 +24,32 @@ The Excel parser scans **all sheets** in your workbook and identifies changes by
 
 ### ✅ Any Excel Structure Works
 
-You don't need specific columns or format. Just highlight the cells you want to change!
+You don't need specific columns or format. Just highlight the cells you want to change! Use any color except grey.
 
-**Example 1: Simple Table**
+**Example 1: Simple Table with Mixed Colors**
 ```
 | Section | Current Policy | New Policy |
 |---------|----------------|------------|
-| Coverage| $500K limit    | $1M limit  | ← Highlight in YELLOW
-|         |                | Add dental | ← Highlight in GREEN
+| Coverage| $500K limit    | $1M limit  | ← Highlight in BLUE (any color)
+|         |                | Add dental | ← Highlight in PINK (any color)
 ```
 
-**Example 2: Mixed Structure**
+**Example 2: Mixed Structure with Deletions**
 ```
 Coverage Details:
-- Current deductible: $500 ← This text in YELLOW (to be modified)
-- New coverage: Add life insurance ← Highlight in GREEN
-- Remove: Legacy plan text ← Highlight in RED
+- Current deductible: $500 ← This text in PURPLE (to be added/modified)
+- New coverage: Add life insurance ← Highlight in ORANGE (any color)
+- Remove: Legacy plan text ← Highlight in GREY (delete this)
 ```
 
-**Example 3: Multiple Sheets**
+**Example 3: Multiple Sheets, Any Colors**
 ```
 Sheet 1: "Medical Policy"
-  - New coverage: Add vision (YELLOW)
+  - New coverage: Add vision (YELLOW, PINK, or any color)
   
 Sheet 2: "Dental Policy"  
-  - Increase limit to $2000 (GREEN)
-  - Remove: Prior authorization (RED)
+  - Increase limit to $2000 (BLUE, GREEN, or any color)
+  - Remove: Prior authorization (GREY = delete)
 ```
 
 ### ✅ Flexible Content
@@ -87,14 +89,17 @@ All sheets in the workbook are scanned. The tool:
 ❌ AVOID: Isolated colored cells with no context
 ```
 
-### 3. **Use One Color Per Change**
+### 3. **Use Highlighting Consistently**
 ```
-✅ GOOD: Each change in one color
-- Line 1: GREEN "Add vision coverage"
-- Line 2: YELLOW "Change deductible to $250"
-- Line 3: RED "Remove legacy plan"
+✅ GOOD: Each change highlighted (any color except grey)
+- Line 1: BLUE "Add vision coverage"
+- Line 2: PINK "Change deductible to $250"
+- Line 3: GREY "Remove legacy plan"
 
-❌ AVOID: Mixing colors in same cell or change
+✅ GOOD: Mix colors however you want (except grey means delete)
+- Use different colors to organize by department, priority, etc.
+
+❌ AVOID: Grey highlighting for things you want to KEEP
 ```
 
 ### 4. **Clear Descriptions**
@@ -207,11 +212,13 @@ After you upload the Excel file:
 
 ### Color Specifications
 
-Use standard Excel colors for best results:
+Any color works! Just remember:
 
-- **GREEN**: RGB (0, 176, 80) or close variations
-- **YELLOW**: RGB (255, 255, 0) or close variations  
-- **RED**: RGB (255, 0, 0) or close variations
+- **GREY**: RGB (~128, ~128, ~128) = Deleted content (will be removed)
+- **Any Other Color**: Highlighted cells = Changes to review
+- **No Highlight**: Ignored (not a change)
+
+You can use any Excel color - there are no restrictions on which colors to use for your changes.
 
 ### Supported Formats
 

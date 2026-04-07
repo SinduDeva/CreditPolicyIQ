@@ -126,14 +126,17 @@ class IntelligentExcelParser:
 
     def _detect_change_type(self, cell) -> Optional[str]:
         """
-        Detect if cell is colored and return change type.
-        More tolerant of color variations and different Excel formats.
+        Detect if cell is highlighted and return change type.
+
+        - Grey color → DELETED
+        - Any other highlighting → treat as change (will ask user for type)
+        - No highlighting → None
 
         Args:
             cell: openpyxl cell object
 
         Returns:
-            Change type (NEW, MODIFIED, DELETED) or None
+            Change type (DELETED) or "CHANGE" for any highlighted cell, or None
         """
         try:
             if not cell.fill or not cell.fill.start_color:
@@ -155,108 +158,56 @@ class IntelligentExcelParser:
 
             self.logger.debug(f"Detected color: {color_str}")
 
-            # Check against color variations with more tolerance
-            # YELLOW variations (light to dark)
-            yellow_colors = [
-                "FFFF00",  # Pure yellow
-                "FFFF00",  # Standard yellow
-                "FFFF99",  # Light yellow
-                "FFFF66",  # Light yellow
-                "FFFF33",  # Medium yellow
-                "FFCCCC",  # Light yellow variant
-                "FFFFCC",  # Cream/light yellow
-                "F4D03F",  # Highlight yellow
-                "F9E79F",  # Light highlight
-                "FEF5E7",  # Very light yellow
-            ]
+            # Skip default/white fills - they're not highlights
+            if color_str.upper() in ["FFFFFF", "FFFFFFFF", "00000000", ""]:
+                return None
 
-            # GREEN variations (light to dark)
-            green_colors = [
-                "00B050",  # Standard green
-                "00B050",  # Excel green
-                "70AD47",  # Light green
-                "92D050",  # Very light green
-                "00B050",  # Dark green
-                "52BE80",  # Medium green
-                "45B649",  # Forest green
-                "82C91E",  # Bright green
-                "ABEBC6",  # Light green
-            ]
-
-            # RED variations (light to dark)
-            red_colors = [
-                "FF0000",  # Pure red
-                "FF0000",  # Standard red
-                "C0504D",  # Dark red
-                "FF6B6B",  # Light red
-                "FF4444",  # Medium red
-                "E74C3C",  # Bright red
-                "F1948A",  # Light red
-                "FADBD8",  # Very light red
-                "D32F2F",  # Deep red
-            ]
-
-            # Check color matches (case-insensitive)
-            color_upper = color_str.upper()
-
-            if any(yellow.upper() in color_upper or color_upper in yellow.upper() for yellow in yellow_colors):
-                self.logger.debug(f"Matched color {color_str} as MODIFIED (yellow)")
-                return "MODIFIED"
-            elif any(green.upper() in color_upper or color_upper in green.upper() for green in green_colors):
-                self.logger.debug(f"Matched color {color_str} as NEW (green)")
-                return "NEW"
-            elif any(red.upper() in color_upper or color_upper in red.upper() for red in red_colors):
-                self.logger.debug(f"Matched color {color_str} as DELETED (red)")
+            # Check if it's grey (for deletions)
+            is_grey = self._is_grey_color(color_str)
+            if is_grey:
+                self.logger.debug(f"Matched color {color_str} as DELETED (grey)")
                 return "DELETED"
 
-            # Try numeric similarity for fuzzy matching
-            return self._fuzzy_match_color(color_str)
+            # Any other color is a change - let the user review the type
+            self.logger.debug(f"Detected highlighted cell with color: {color_str}")
+            return "CHANGE"
 
         except Exception as e:
             self.logger.debug(f"Error detecting color: {e}")
             return None
 
-    def _fuzzy_match_color(self, color_hex: str) -> Optional[str]:
+    def _is_grey_color(self, color_hex: str) -> bool:
         """
-        Fuzzy match a color hex code to the nearest color type.
-        Handles cases where exact match isn't found.
+        Check if a color is grey (R ≈ G ≈ B).
 
         Args:
-            color_hex: Hex color code (6 or 8 chars)
+            color_hex: Hex color code (6 chars, no FF prefix)
 
         Returns:
-            Change type or None
+            True if color is grey, False otherwise
         """
         try:
-            # Remove FF prefix if present
             color_hex = color_hex.upper()
-            if color_hex.startswith('FF') and len(color_hex) > 6:
-                color_hex = color_hex[2:]
-
-            # Parse RGB components
             if len(color_hex) < 6:
-                return None
+                return False
 
             r = int(color_hex[0:2], 16)
             g = int(color_hex[2:4], 16)
             b = int(color_hex[4:6], 16)
 
-            # Determine dominant color
-            if g > r and g > b and g > 150:  # Green dominant and bright
-                self.logger.debug(f"Fuzzy matched {color_hex} as NEW (green-dominant)")
-                return "NEW"
-            elif r > 150 and g > 150 and b < 100:  # Yellow (high R, high G, low B)
-                self.logger.debug(f"Fuzzy matched {color_hex} as MODIFIED (yellow-dominant)")
-                return "MODIFIED"
-            elif r > 150 and g < 100 and b < 100:  # Red (high R, low G, low B)
-                self.logger.debug(f"Fuzzy matched {color_hex} as DELETED (red-dominant)")
-                return "DELETED"
+            # Grey if R, G, B are all roughly equal (within 20 points)
+            max_diff = max(abs(r - g), abs(g - b), abs(r - b))
+            is_grey = max_diff <= 20
 
-            return None
+            if is_grey:
+                self.logger.debug(f"Color {color_hex} identified as grey (R={r}, G={g}, B={b})")
+
+            return is_grey
 
         except Exception as e:
-            self.logger.debug(f"Error in fuzzy color matching: {e}")
-            return None
+            self.logger.debug(f"Error checking if color is grey: {e}")
+            return False
+
 
     def _extract_change(
         self, cell, change_type: str, sheet_name: str, row_idx: int, col_idx: int
