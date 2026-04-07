@@ -312,7 +312,7 @@ def page_review_changes():
 
 
 def page_approve_changes():
-    """Approve or reject pending changes."""
+    """Approve or reject pending changes with edit option."""
     st.title("✅ Approve Changes")
 
     with st.spinner("Loading changes ready for approval..."):
@@ -336,76 +336,140 @@ def page_approve_changes():
         change_id = change.get("change_id", f"Change_{idx}")
         original = change.get("original_data", {})
         llm_result = change.get("llm_suggestion", {})
+        was_edited = llm_result.get("was_edited", False)
 
         with st.expander(
-            f"🔹 {original.get('Section_Name', 'Unknown')[:40]}", expanded=False
+            f"🔹 {original.get('Section_Name', 'Unknown')[:40]}" + (" [EDITED]" if was_edited else ""), expanded=False
         ):
-            # Display suggestion
+            # Display original suggestion
             st.write("**Suggested Narrative:**")
-            st.code(llm_result.get("suggested_narrative", "N/A"))
+            current_narrative = llm_result.get("suggested_narrative", "N/A")
 
-            # Metrics
-            col1, col2 = st.columns(2)
-            with col1:
-                st.metric("Confidence", f"{llm_result.get('confidence_score', 0):.1%}")
+            # Show tabs for view/edit
+            tab1, tab2, tab3 = st.tabs(["📖 View", "✏️ Edit", "✅ Approve/❌ Reject"])
 
-            with col2:
-                st.metric("Format", llm_result.get("format_type", "N/A"))
+            with tab1:
+                st.code(current_narrative)
 
-            st.divider()
+                # Metrics
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.metric("Confidence", f"{llm_result.get('confidence_score', 0):.1%}")
+                with col2:
+                    st.metric("Format", llm_result.get("format_type", "N/A"))
 
-            # Approval/Rejection actions
-            col1, col2 = st.columns(2)
+                # Show if edited
+                if was_edited:
+                    st.info("✏️ This suggestion has been edited")
+                    if "original_narrative" in llm_result:
+                        with st.expander("See original suggestion"):
+                            st.code(llm_result["original_narrative"])
+                    if "edit_notes" in llm_result and llm_result["edit_notes"]:
+                        st.write(f"**Edit notes:** {llm_result['edit_notes']}")
 
-            with col1:
-                st.write("**Approve this change:**")
-                with st.form(f"approve_form_{change_id}"):
-                    comment = st.text_area(
-                        "Comment (optional)",
-                        placeholder="Add approval comment...",
-                        key=f"approve_comment_{change_id}",
+            with tab2:
+                st.write("Edit the suggested narrative before approval:")
+                with st.form(f"edit_form_{change_id}"):
+                    edited_text = st.text_area(
+                        "Narrative",
+                        value=current_narrative,
+                        height=150,
+                        key=f"edit_narrative_{change_id}",
                     )
-                    submit = st.form_submit_button("✅ Approve", use_container_width=True)
+                    edit_notes = st.text_input(
+                        "Why are you editing? (optional)",
+                        placeholder="e.g., Better wording, Clarification...",
+                        key=f"edit_notes_{change_id}",
+                    )
 
-                    if submit:
-                        if st.checkbox("Confirm approval", key=f"confirm_approve_{change_id}"):
-                            with st.spinner("Approving change..."):
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        submit_edit = st.form_submit_button("💾 Save Edit", use_container_width=True)
+                    with col2:
+                        st.form_submit_button("Cancel", use_container_width=True)
+
+                    if submit_edit:
+                        if edited_text.strip():
+                            with st.spinner("Saving edit..."):
                                 success, result = api_call(
                                     "POST",
-                                    f"/changes/{change_id}/approve",
-                                    json_data={"user": "dashboard_user", "comment": comment},
+                                    f"/changes/{change_id}/edit-suggestion",
+                                    json_data={
+                                        "edited_narrative": edited_text,
+                                        "edit_notes": edit_notes,
+                                    },
                                 )
 
                             if success:
-                                st.success("✅ Change approved!")
+                                st.success("✅ Suggestion updated!")
                                 st.rerun()
                             else:
-                                st.error(f"Approval failed: {result}")
+                                st.error(f"Edit failed: {result}")
+                        else:
+                            st.error("Narrative cannot be empty")
 
-            with col2:
-                st.write("**Reject this change:**")
-                with st.form(f"reject_form_{change_id}"):
-                    reason = st.text_area(
-                        "Reason for rejection",
-                        placeholder="Explain why this change is being rejected...",
-                        key=f"reject_reason_{change_id}",
-                    )
-                    submit = st.form_submit_button("❌ Reject", use_container_width=True)
+            with tab3:
+                st.write(f"**Current Narrative (to be applied to master):**")
+                st.info(current_narrative)
 
-                    if submit:
-                        if st.checkbox("Confirm rejection", key=f"confirm_reject_{change_id}"):
-                            with st.spinner("Rejecting change..."):
-                                success, result = api_call(
-                                    "POST",
-                                    f"/changes/{change_id}/reject",
-                                    json_data={"reason": reason or "No reason provided"},
-                                )
+                st.divider()
 
-                            if success:
-                                st.success("✅ Change rejected!")
-                                st.rerun()
-                            else:
-                                st.error(f"Rejection failed: {result}")
+                # Approval/Rejection actions
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.write("**✅ Accept & Approve**")
+                    with st.form(f"approve_form_{change_id}"):
+                        comment = st.text_area(
+                            "Approval comment (optional)",
+                            placeholder="Add approval comment...",
+                            height=80,
+                            key=f"approve_comment_{change_id}",
+                        )
+                        st.caption("This will approve the change for application to master document")
+                        submit = st.form_submit_button("✅ Approve Change", use_container_width=True, type="primary")
+
+                        if submit:
+                            if st.checkbox("I confirm this change is ready", key=f"confirm_approve_{change_id}"):
+                                with st.spinner("Approving change..."):
+                                    success, result = api_call(
+                                        "POST",
+                                        f"/changes/{change_id}/approve",
+                                        json_data={"user": "dashboard_user", "comment": comment},
+                                    )
+
+                                if success:
+                                    st.success("✅ Change approved and ready to apply!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"Approval failed: {result}")
+
+                with col2:
+                    st.write("**❌ Reject**")
+                    with st.form(f"reject_form_{change_id}"):
+                        reason = st.text_area(
+                            "Rejection reason (optional)",
+                            placeholder="Explain why this change is being rejected...",
+                            height=80,
+                            key=f"reject_reason_{change_id}",
+                        )
+                        st.caption("This will reject the change and mark it as not approved")
+                        submit = st.form_submit_button("❌ Reject Change", use_container_width=True)
+
+                        if submit:
+                            if st.checkbox("I confirm rejection", key=f"confirm_reject_{change_id}"):
+                                with st.spinner("Rejecting change..."):
+                                    success, result = api_call(
+                                        "POST",
+                                        f"/changes/{change_id}/reject",
+                                        json_data={"reason": reason or "Rejected by user"},
+                                    )
+
+                                if success:
+                                    st.success("✅ Change rejected!")
+                                    st.rerun()
+                                else:
+                                    st.error(f"Rejection failed: {result}")
 
 
 # ============================================================================

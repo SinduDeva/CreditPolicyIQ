@@ -247,6 +247,9 @@ async def upload_master(file: UploadFile = File(...)) -> Dict[str, Any]:
         logger.error(f"Error in upload_master: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.get("/api/master/current")
+async def get_master_current() -> FileResponse:
     """
     Download current master DOCX file.
 
@@ -413,6 +416,80 @@ async def translate_change(change_id: str) -> Dict[str, Any]:
         raise
     except Exception as e:
         logger.error(f"Error in translate_change: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/changes/{change_id}/edit-suggestion")
+async def edit_suggestion(
+    change_id: str, body: Dict[str, str] = Body(...)
+) -> Dict[str, Any]:
+    """
+    Edit the LLM-suggested narrative for a change.
+
+    Args:
+        change_id: ID of change to edit
+        body: JSON body with edited_narrative and optional notes
+
+    Returns:
+        Updated change with edited suggestion
+    """
+    try:
+        edited_narrative = body.get("edited_narrative", "")
+        edit_notes = body.get("edit_notes", "")
+
+        # Load change from file
+        change_data = file_storage.load_json(f"changes/{change_id}.json")
+
+        if not change_data:
+            logger.warning(f"Change not found: {change_id}")
+            raise HTTPException(
+                status_code=404, detail=f"Change {change_id} not found"
+            )
+
+        # Validate edited narrative is not empty
+        if not edited_narrative.strip():
+            logger.warning(f"Empty narrative provided for change {change_id}")
+            raise HTTPException(
+                status_code=400, detail="Narrative cannot be empty"
+            )
+
+        # Update the suggested narrative
+        if "llm_suggestion" not in change_data:
+            change_data["llm_suggestion"] = {}
+
+        original_narrative = change_data["llm_suggestion"].get("suggested_narrative", "")
+        change_data["llm_suggestion"]["suggested_narrative"] = edited_narrative
+        change_data["llm_suggestion"]["was_edited"] = True
+        change_data["llm_suggestion"]["original_narrative"] = original_narrative
+        change_data["llm_suggestion"]["edit_notes"] = edit_notes
+        change_data["llm_suggestion"]["edited_at"] = datetime.utcnow().isoformat()
+
+        # Save updated change
+        file_storage.save_json(f"changes/{change_id}.json", change_data)
+
+        # Log edit
+        file_storage.append_to_log(
+            "metadata/edit_log.json",
+            {
+                "change_id": change_id,
+                "action": "suggestion_edited",
+                "notes": edit_notes,
+            },
+        )
+
+        logger.info(f"Edited suggestion for change {change_id}")
+
+        return {
+            "status": "success",
+            "change_id": change_id,
+            "message": "Suggestion updated. You can now approve the change.",
+            "edited_narrative": edited_narrative,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in edit_suggestion: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
