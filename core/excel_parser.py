@@ -13,15 +13,10 @@ COLOR_NEW = "FF00B050"  # Green
 COLOR_MODIFIED = "FFFFFF00"  # Yellow
 COLOR_DELETED = "FFFF0000"  # Red
 
-# Required columns
+# Minimal required columns (only these must be present)
 REQUIRED_COLUMNS = [
-    "Section_ID",
     "Section_Name",
     "Policy_Content",
-    "UW_Technical_Details",
-    "Status",
-    "Color_Flag",
-    "Notes",
 ]
 
 
@@ -99,20 +94,24 @@ class ExcelParser:
         # Create cell dictionary
         cells = {headers[i]: cell for i, cell in enumerate(row)}
 
-        # Extract values
-        section_id = cells["Section_ID"].value
-        section_name = cells["Section_Name"].value
-        policy_content = cells["Policy_Content"].value
-        uw_details = cells["UW_Technical_Details"].value
-        status = cells["Status"].value
-        notes = cells["Notes"].value
+        # Extract required values
+        section_name = cells.get("Section_Name", {}).value if "Section_Name" in cells else None
+        policy_content = cells.get("Policy_Content", {}).value if "Policy_Content" in cells else None
 
-        # Skip empty rows
-        if not section_id or not section_name:
+        # Skip empty rows (only if required fields are empty)
+        if not section_name or not policy_content:
             return None
 
-        # Detect color
-        color = self._detect_color(cells["Color_Flag"])
+        # Extract optional values (with safe defaults)
+        section_id = cells.get("Section_ID", {}).value if "Section_ID" in cells else f"ID_{section_name[:10]}"
+        uw_details = cells.get("UW_Technical_Details", {}).value if "UW_Technical_Details" in cells else ""
+        status = cells.get("Status", {}).value if "Status" in cells else "PENDING"
+        notes = cells.get("Notes", {}).value if "Notes" in cells else ""
+
+        # Detect color if Color_Flag column exists
+        color = "NONE"
+        if "Color_Flag" in cells:
+            color = self._detect_color(cells["Color_Flag"])
 
         change = {
             "Section_ID": section_id,
