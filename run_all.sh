@@ -43,7 +43,28 @@ fi
 
 # Activate virtual environment
 echo "📦 Activating virtual environment..."
-source venv/bin/activate
+
+# Detect OS and activate appropriately
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
+    # Windows (Git Bash, MSYS, Cygwin)
+    if [ -f "venv/Scripts/activate" ]; then
+        source venv/Scripts/activate
+    else
+        echo "❌ Error: Virtual environment activation script not found"
+        echo "   Expected: venv/Scripts/activate"
+        echo "   Check if venv directory exists: $(ls -la venv 2>/dev/null || echo 'NOT FOUND')"
+        exit 1
+    fi
+elif [ -f "venv/bin/activate" ]; then
+    # Unix-like systems (macOS, Linux)
+    source venv/bin/activate
+else
+    echo "❌ Error: Virtual environment activation script not found"
+    echo "   Expected: venv/bin/activate"
+    echo "   Check if venv directory exists: $(ls -la venv 2>/dev/null || echo 'NOT FOUND')"
+    exit 1
+fi
+
 echo "✅ Virtual environment activated"
 echo ""
 
@@ -112,8 +133,18 @@ echo ""
 
 # Start backend in background
 echo "1️⃣  Starting FastAPI backend on port 8000..."
+
+# Determine correct activation script for OS
+if [[ "$OSTYPE" == "msys" || "$OSTYPE" == "win32" || "$OSTYPE" == "cygwin" ]]; then
+    # Windows
+    ACTIVATE_CMD="source venv/Scripts/activate && python app.py"
+else
+    # Unix-like (macOS, Linux)
+    ACTIVATE_CMD="source venv/bin/activate && python app.py"
+fi
+
 # Use bash -c to ensure venv is active in the background process
-bash -c "source venv/bin/activate && python3 app.py" &
+bash -c "$ACTIVATE_CMD" &
 BACKEND_PID=$!
 echo "   Backend PID: $BACKEND_PID"
 echo ""
