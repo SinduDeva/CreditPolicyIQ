@@ -12,6 +12,8 @@ from openpyxl.styles import PatternFill
 from datetime import datetime
 import hashlib
 
+from config import config
+
 logger = logging.getLogger(__name__)
 
 # Color definitions for change types
@@ -128,15 +130,16 @@ class IntelligentExcelParser:
         """
         Detect if cell is highlighted and return change type.
 
-        - Grey color → DELETED
-        - Any other highlighting → treat as change (will ask user for type)
-        - No highlighting → None
+        Detection mode from config:
+        - 'yellow_only': Only yellow highlights are detected as changes (GREY=DELETED)
+        - 'all_colors': Any color is detected as change
+        - 'configurable': Use the highlight_colors config
 
         Args:
             cell: openpyxl cell object
 
         Returns:
-            Change type (DELETED) or "CHANGE" for any highlighted cell, or None
+            Change type (DELETED, CHANGE) or None
         """
         try:
             if not cell.fill or not cell.fill.start_color:
@@ -162,19 +165,77 @@ class IntelligentExcelParser:
             if color_str.upper() in ["FFFFFF", "FFFFFFFF", "00000000", ""]:
                 return None
 
-            # Check if it's grey (for deletions)
-            is_grey = self._is_grey_color(color_str)
-            if is_grey:
+            # Check if it's grey (for deletions) - always detected regardless of mode
+            if self._is_grey_color(color_str):
                 self.logger.debug(f"Matched color {color_str} as DELETED (grey)")
                 return "DELETED"
 
-            # Any other color is a change - let the user review the type
-            self.logger.debug(f"Detected highlighted cell with color: {color_str}")
-            return "CHANGE"
+            # Change detection based on configured mode
+            detection_mode = config.change_detection_mode
+
+            if detection_mode == "yellow_only":
+                # Only detect yellow highlights
+                if self._is_yellow_color(color_str):
+                    self.logger.debug(f"Matched color {color_str} as CHANGE (yellow)")
+                    return "CHANGE"
+                else:
+                    self.logger.debug(f"Ignored non-yellow color: {color_str} (mode: yellow_only)")
+                    return None
+
+            elif detection_mode == "all_colors":
+                # Any color is a change
+                self.logger.debug(f"Detected highlighted cell with color: {color_str} (mode: all_colors)")
+                return "CHANGE"
+
+            elif detection_mode == "configurable":
+                # Check against configured colors
+                for color_type, color_list in config.highlight_colors.items():
+                    if color_str.upper() in [c.upper() for c in color_list]:
+                        self.logger.debug(f"Matched color {color_str} as {color_type}")
+                        return color_type if color_type in ["CHANGE", "DELETED"] else "CHANGE"
+                return None
+            else:
+                return None
 
         except Exception as e:
             self.logger.debug(f"Error detecting color: {e}")
             return None
+
+    def _is_yellow_color(self, color_hex: str) -> bool:
+        """
+        Check if a color is yellow (high R, high G, low B).
+
+        Args:
+            color_hex: Hex color code (6 chars, no FF prefix)
+
+        Returns:
+            True if color is yellow, False otherwise
+        """
+        try:
+            color_hex = color_hex.upper()
+            if len(color_hex) < 6:
+                return False
+
+            r = int(color_hex[0:2], 16)
+            g = int(color_hex[2:4], 16)
+            b = int(color_hex[4:6], 16)
+
+            # Yellow if R and G are high, B is low
+            # (allowing some variation in brightness)
+            is_yellow = (
+                r > 150 and  # Red channel high
+                g > 150 and  # Green channel high
+                b < 100      # Blue channel low
+            )
+
+            if is_yellow:
+                self.logger.debug(f"Color {color_hex} identified as yellow (R={r}, G={g}, B={b})")
+
+            return is_yellow
+
+        except Exception as e:
+            self.logger.debug(f"Error checking if color is yellow: {e}")
+            return False
 
     def _is_grey_color(self, color_hex: str) -> bool:
         """

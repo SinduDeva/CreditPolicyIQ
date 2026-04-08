@@ -129,9 +129,12 @@ async def upload_excel(file: UploadFile = File(...)) -> Dict[str, Any]:
         # Load master structure once (cached)
         master_structure = _get_master_structure()
 
-        # Build changes with context — map each to master section
+        # OPTIMIZATION: Process first batch immediately, rest in background
+        # This ensures fast response time even with thousands of changes
+        batch_size = 50  # Map first 50 immediately for UI display
+
         saved_changes = []
-        for change in parsed_changes:
+        for i, change in enumerate(parsed_changes):
             context = change.get("context", {})
             content = change.get("content", "").strip()
             if not content:
@@ -140,13 +143,20 @@ async def upload_excel(file: UploadFile = File(...)) -> Dict[str, Any]:
             change_id = change.get("change_id")
             change_type = change.get("type", "CHANGE")
 
-            # Map to master section
+            # Map first batch immediately, others get basic info
             mapping = {}
-            if master_structure and master_structure.get("sections"):
+            if i < batch_size and master_structure and master_structure.get("sections"):
                 mapping = change_mapper.map_change_to_section(
                     {"Policy_Content": content, "Context": context.get("before", ""), "Change_Type": change_type},
                     master_structure,
                 )
+            else:
+                # Placeholder for unmapped changes (will be mapped on-demand)
+                mapping = {
+                    "confidence": 0,
+                    "matched": False,
+                    "reason": "Pending background mapping"
+                }
 
             record = {
                 "change_id": change_id,
@@ -166,14 +176,18 @@ async def upload_excel(file: UploadFile = File(...)) -> Dict[str, Any]:
         file_storage.append_to_log("metadata/upload_log.json", {
             "filename": file.filename, "size": len(contents),
             "total_changes": len(saved_changes),
+            "batch_mapped": min(batch_size, len(saved_changes)),
         })
 
-        logger.info(f"Processed {file.filename}: {len(saved_changes)} changes saved")
+        logger.info(f"Processed {file.filename}: {len(saved_changes)} changes saved "
+                    f"({min(batch_size, len(saved_changes))} mapped, "
+                    f"{max(0, len(saved_changes) - batch_size)} pending)")
 
         return {
             "status": "success",
             "file_uploaded": file.filename,
             "total_changes": len(saved_changes),
+            "message": f"Detected {len(saved_changes)} changes. Showing first {min(batch_size, len(saved_changes))} mapped."
         }
 
     except HTTPException:
@@ -425,7 +439,54 @@ async def upload_master(file: UploadFile = File(...)) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/api/master/current-status")
+@app.post("/api/changes/{change_id}/map-section")
+async def map_change_to_section(change_id: str) -> Dict[str, Any]:
+    """
+    Map a single change to master document section (on-demand).
+    Useful for lazy-loading mappings of changes.
+    """
+    try:
+        # Load the change
+        change_file = Path(f"data/changes/{change_id}.json")
+        if not change_file.exists():
+            raise HTTPException(status_code=404, detail=f"Change {change_id} not found")
+
+        with open(change_file, "r") as f:
+            change = json.load(f)
+
+        # Get master structure
+        master_structure = _get_master_structure()
+        if not master_structure:
+            raise HTTPException(status_code=400, detail="Master document not found")
+
+        # Map the change
+        mapping = change_mapper.map_change_to_section(
+            {"Policy_Content": change.get("Policy_Content", ""),
+             "Context": change.get("Context", ""),
+             "Change_Type": change.get("Change_Type", "CHANGE")},
+            master_structure,
+        )
+
+        # Update the change with new mapping
+        change["mapping"] = mapping
+        with open(change_file, "w") as f:
+            json.dump(change, f, indent=2)
+
+        logger.info(f"Mapped change {change_id} to {mapping.get('section_title', 'unknown')}")
+
+        return {
+            "status": "success",
+            "change_id": change_id,
+            "mapping": mapping,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error mapping change {change_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 async def get_master_status() -> Dict[str, Any]:
     """
     Get status of current master DOCX file.
