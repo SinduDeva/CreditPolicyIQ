@@ -520,6 +520,43 @@ async def get_master_status() -> Dict[str, Any]:
         }
 
 
+@app.get("/api/master/current-status")
+async def get_master_status() -> Dict[str, Any]:
+    """
+    Check master document status.
+
+    Returns:
+        Status dictionary with exists flag and file info
+    """
+    try:
+        master_path = Path(config.master_docx)
+        exists = master_path.exists()
+
+        if exists:
+            stat = master_path.stat()
+            return {
+                "exists": True,
+                "path": str(master_path),
+                "size": stat.st_size,
+                "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "uploaded": True,
+            }
+        else:
+            return {
+                "exists": False,
+                "path": str(master_path),
+                "uploaded": False,
+            }
+
+    except Exception as e:
+        logger.error(f"Error checking master status: {e}")
+        return {
+            "exists": False,
+            "error": str(e),
+            "uploaded": False,
+        }
+
+
 @app.get("/api/master/current")
 async def get_master_current() -> FileResponse:
     """
