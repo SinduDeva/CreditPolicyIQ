@@ -1027,6 +1027,193 @@ async def get_approvals_log() -> Dict[str, Any]:
 # ============================================================================
 
 
+# ============================================================================
+# DOCUMENT PREVIEW & VISUALIZATION ENDPOINTS
+# ============================================================================
+
+
+@app.get("/api/master/preview")
+async def get_master_preview() -> Dict[str, Any]:
+    """
+    Get HTML preview of master document.
+
+    Returns:
+        Dict with HTML content and metadata
+    """
+    try:
+        master_path = Path(config.master_docx)
+        if not master_path.exists():
+            raise HTTPException(status_code=404, detail="Master document not found")
+
+        from core.document_preview import DocumentPreview
+
+        preview = DocumentPreview()
+        if not preview.load_document(str(master_path)):
+            raise HTTPException(status_code=500, detail="Failed to load document")
+
+        html_content = preview.get_full_document_html()
+        stats = preview.get_document_stats()
+
+        return {
+            "status": "success",
+            "html": html_content,
+            "stats": stats,
+            "file_path": str(master_path),
+            "file_size": master_path.stat().st_size,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating master preview: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/master/stats")
+async def get_master_stats() -> Dict[str, Any]:
+    """
+    Get statistics about master document.
+
+    Returns:
+        Document statistics
+    """
+    try:
+        master_path = Path(config.master_docx)
+        if not master_path.exists():
+            raise HTTPException(status_code=404, detail="Master document not found")
+
+        from core.document_preview import DocumentPreview
+
+        preview = DocumentPreview()
+        if not preview.load_document(str(master_path)):
+            raise HTTPException(status_code=500, detail="Failed to load document")
+
+        stats = preview.get_document_stats()
+
+        return {
+            "status": "success",
+            "stats": stats,
+            "file_info": {
+                "path": str(master_path),
+                "size": master_path.stat().st_size,
+                "modified": datetime.fromtimestamp(master_path.stat().st_mtime).isoformat(),
+            },
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting master stats: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/changes/{change_id}/preview")
+async def get_change_preview(change_id: str) -> Dict[str, Any]:
+    """
+    Get preview of a change in document context.
+
+    Args:
+        change_id: ID of the change
+
+    Returns:
+        Dict with HTML preview and location info
+    """
+    try:
+        # Load change
+        change = file_storage.load_change(change_id)
+        if not change:
+            raise HTTPException(status_code=404, detail=f"Change {change_id} not found")
+
+        master_path = Path(config.master_docx)
+        if not master_path.exists():
+            raise HTTPException(status_code=404, detail="Master document not found")
+
+        from core.document_preview import DocumentPreview
+
+        preview = DocumentPreview()
+        if not preview.load_document(str(master_path)):
+            raise HTTPException(status_code=500, detail="Failed to load document")
+
+        # Get mapped location from change
+        mapped_location = change.get("mapped_location")
+
+        # Generate preview HTML
+        html_content = preview.get_change_context_html(change, mapped_location)
+
+        return {
+            "status": "success",
+            "change_id": change_id,
+            "change_type": change.get("type"),
+            "content": change.get("content"),
+            "html": html_content,
+            "mapped_location": mapped_location,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating change preview: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/changes/batch-suggest")
+async def batch_generate_suggestions(
+    change_ids: List[str] = Body(...),
+) -> Dict[str, Any]:
+    """
+    Generate LLM suggestions for multiple changes.
+
+    Args:
+        change_ids: List of change IDs
+
+    Returns:
+        Dict with suggestions for each change
+    """
+    try:
+        from core.llm_suggestion_generator import LLMSuggestionGenerator
+        from core.parallel_processor import ParallelProcessor
+
+        # Load all changes
+        changes = []
+        for cid in change_ids:
+            change = file_storage.load_change(cid)
+            if change:
+                changes.append(change)
+
+        if not changes:
+            raise HTTPException(status_code=404, detail="No valid changes found")
+
+        # Generate suggestions with parallel processing
+        suggestion_gen = LLMSuggestionGenerator()
+        processor = ParallelProcessor(num_workers=min(4, len(changes)))
+
+        suggestions = suggestion_gen.generate_batch_suggestions(changes)
+
+        # Store suggestions
+        results = {}
+        for change, suggestion in zip(changes, suggestions):
+            change_id = change.get("change_id")
+            change["suggestion"] = suggestion
+            file_storage.save_change(change)
+            results[change_id] = {
+                "suggestion_text": suggestion.get("suggestion_text"),
+                "confidence": suggestion.get("confidence"),
+                "source": suggestion.get("source"),
+            }
+
+        return {
+            "status": "success",
+            "total": len(changes),
+            "suggestions": results,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating batch suggestions: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/health")
 async def health_check() -> Dict[str, str]:
     """
