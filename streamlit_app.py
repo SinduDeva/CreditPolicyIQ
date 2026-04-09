@@ -428,6 +428,35 @@ else:
     else:
         st.markdown(f"**{total_changes} changes detected & mapped**")
 
+    # Add suggestion generation button
+    col_suggest, col_space = st.columns([1, 4])
+    with col_suggest:
+        if st.button("💡 Generate Suggestions", use_container_width=True, key="gen_suggestions"):
+            with st.spinner("Generating LLM suggestions for all changes..."):
+                change_ids = [c.get("change_id", f"Change_{i}") for i, c in enumerate(changes)]
+                success, response = api_call("POST", "/changes/batch-suggest", {
+                    "change_ids": change_ids[:10]  # Limit to first 10 for performance
+                })
+
+                if success:
+                    suggested = response.get("suggestions", {})
+                    st.markdown(f"""
+                    <div class="status-box status-success">
+                        ✅ Generated suggestions for {len(suggested)} changes<br>
+                        Ready for review
+                    </div>
+                    """, unsafe_allow_html=True)
+                    st.rerun()
+                else:
+                    st.markdown(f"""
+                    <div class="status-box status-warning">
+                        ⚠️ Suggestion generation not fully available<br>
+                        You can still review changes manually
+                    </div>
+                    """, unsafe_allow_html=True)
+
+    st.markdown("---")
+
     for idx, change in enumerate(changes):
         change_type = change.get("Change_Type", "CHANGE")
         change_id = change.get("change_id", f"Change_{idx}")
@@ -504,6 +533,102 @@ else:
                     })
                     if ok:
                         st.rerun()
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+# ============================================================================
+# DIVIDER
+# ============================================================================
+st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
+
+# ============================================================================
+# SECTION 2.5: DOCUMENT PREVIEW (OPTIONAL)
+# ============================================================================
+st.markdown('<div class="section">', unsafe_allow_html=True)
+st.markdown('<div class="section-title">📄 Document Preview</div>', unsafe_allow_html=True)
+
+# Add tabs for preview options
+preview_tab1, preview_tab2 = st.tabs(["Master Document", "Change Context"])
+
+with preview_tab1:
+    if st.button("Load Master Document Preview", use_container_width=True, key="load_preview"):
+        with st.spinner("Loading preview..."):
+            success, response = api_call("GET", "/master/preview")
+            if success:
+                st.session_state.master_preview_html = response.get("html")
+                st.session_state.master_stats = response.get("stats")
+
+    if "master_preview_html" in st.session_state:
+        # Show stats
+        stats = st.session_state.get("master_stats", {})
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Paragraphs", stats.get("sections", 0))
+        with col2:
+            st.metric("Tables", stats.get("tables", 0))
+        with col3:
+            st.metric("Headings", stats.get("headings", 0))
+
+        # Show preview
+        st.components.v1.html(
+            st.session_state.master_preview_html,
+            height=600,
+            scrolling=True
+        )
+
+        # Download button
+        if st.download_button(
+            "📥 Download Preview as HTML",
+            data=st.session_state.master_preview_html,
+            file_name="master_preview.html",
+            mime="text/html",
+            use_container_width=True
+        ):
+            st.success("Download started")
+
+with preview_tab2:
+    if changes:
+        st.markdown("Select a change to see its context in the master document:")
+
+        # Select a change to preview
+        change_options = [
+            f"{c.get('Change_Type', 'CHANGE')} | {c.get('Policy_Content', '')[:60]}"
+            for c in changes[:10]  # Show first 10 for performance
+        ]
+
+        if change_options:
+            selected_idx = st.selectbox("Changes (first 10 shown):", range(len(change_options)),
+                                       format_func=lambda i: change_options[i])
+
+            selected_change = changes[selected_idx]
+            change_id = selected_change.get("change_id", f"Change_{selected_idx}")
+
+            if st.button("Show Change in Context", use_container_width=True, key="show_context"):
+                with st.spinner("Loading change context..."):
+                    success, response = api_call("GET", f"/changes/{change_id}/preview")
+
+                    if success:
+                        # Show change info
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.caption(f"Type: {response.get('change_type', 'UNKNOWN')}")
+                        with col2:
+                            location = response.get("mapped_location", {})
+                            st.caption(f"Location: {location.get('type', 'Not mapped')}")
+                        with col3:
+                            confidence = location.get("confidence", 0) if location else 0
+                            st.caption(f"Confidence: {confidence:.0%}")
+
+                        # Show the preview
+                        html_content = response.get("html")
+                        if html_content:
+                            st.components.v1.html(html_content, height=600, scrolling=True)
+                        else:
+                            st.info("Preview not available for this change")
+                    else:
+                        st.error(f"Failed to load preview: {response}")
+    else:
+        st.info("No changes available to preview")
 
 st.markdown('</div>', unsafe_allow_html=True)
 
